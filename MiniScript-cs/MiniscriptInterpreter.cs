@@ -319,6 +319,14 @@ namespace Miniscript {
 			if (vm != null) vm.globalContext.SetVar(varName, value);
 		}
 		
+		/// <summary>
+		/// Get the current implicit result value (the "_" variable), if any.
+		/// </summary>
+		/// <returns>implicit result value, or null when none has been assigned yet</returns>
+		public Value GetImplicitResult() {
+			return GetGlobalValue(ValVar.implicitResult.identifier);
+		}
+		
 		
 		/// <summary>
 		/// Helper method that checks whether we have a new implicit result, and if
@@ -328,7 +336,6 @@ namespace Miniscript {
 		/// <param name="previousImpResultCount">previous value of implicitResultCounter</param>
 		protected void CheckImplicitResult(int previousImpResultCount) {
 			if (implicitOutput != null && vm.globalContext.implicitResultCounter > previousImpResultCount) {
-
 				Value result = vm.globalContext.GetVar(ValVar.implicitResult.identifier);
 				if (result != null) {
 					implicitOutput.Invoke(result.ToString(vm), true);

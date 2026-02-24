@@ -788,6 +788,9 @@ namespace Miniscript {
 				Intrinsic intrinsic = Intrinsic.GetByName(identifier);
 				if (intrinsic != null) return intrinsic.GetFunc();
 
+				// Special case: implicit result variable `_` may legitimately be absent.
+				if (identifier == ValVar.implicitResult.identifier) return null;
+
 				// No luck there either?  Undefined identifier.
 				throw new UndefinedIdentifierException(identifier);
 			}
