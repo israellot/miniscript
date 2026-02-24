@@ -132,6 +132,25 @@ namespace Miniscript {
 			}
 			await CheckOutput("print " + lambdaAddName + "(2,3)", "5").ConfigureAwait(false);
 
+			// Lambda factory should convert unsigned numeric parameter types.
+			const string lambdaUIntName = "__unit_lambda_uint";
+			if (Intrinsic.GetByName(lambdaUIntName) == null) {
+				Intrinsic.CreateFromLambda(lambdaUIntName, (uint x) => (double)(x + 1U));
+			}
+			await CheckOutput("print " + lambdaUIntName + "(41)", "42").ConfigureAwait(false);
+
+			const string lambdaULongName = "__unit_lambda_ulong";
+			if (Intrinsic.GetByName(lambdaULongName) == null) {
+				Intrinsic.CreateFromLambda(lambdaULongName, (ulong x) => (double)(x + 1UL));
+			}
+			await CheckOutput("print " + lambdaULongName + "(41)", "42").ConfigureAwait(false);
+
+			const string lambdaUShortName = "__unit_lambda_ushort";
+			if (Intrinsic.GetByName(lambdaUShortName) == null) {
+				Intrinsic.CreateFromLambda(lambdaUShortName, (ushort x) => (double)(x + 1));
+			}
+			await CheckOutput("print " + lambdaUShortName + "(41)", "42").ConfigureAwait(false);
+
 			// object-typed lambda parameters should still receive unwrapped CLR primitives.
 			const string lambdaObjKindName = "__unit_lambda_obj_kind";
 			if (Intrinsic.GetByName(lambdaObjKindName) == null) {
@@ -160,6 +179,17 @@ namespace Miniscript {
 				Intrinsic.CreateFromLambda(lambdaListSumName, (List<double> xs) => xs.Sum());
 			}
 			await CheckOutput("print " + lambdaListSumName + "([1,2,3])", "6").ConfigureAwait(false);
+
+			const string lambdaListUIntSumName = "__unit_lambda_list_uint_sum";
+			if (Intrinsic.GetByName(lambdaListUIntSumName) == null) {
+				Intrinsic.CreateFromLambda(lambdaListUIntSumName, (List<uint> xs) => {
+					if (xs == null) return 0.0;
+					double sum = 0;
+					for (int i = 0; i < xs.Count; i++) sum += xs[i];
+					return sum;
+				});
+			}
+			await CheckOutput("print " + lambdaListUIntSumName + "([1,2,3])", "6").ConfigureAwait(false);
 
 			// Sync-only run should throw if an intrinsic returns an incomplete async task.
 			const string asyncNeverName = "__unit_async_never";

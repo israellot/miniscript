@@ -305,10 +305,13 @@ namespace Miniscript {
 			if (targetType == typeof(double)) return value == null ? 0.0 : value.DoubleValue();
 			if (targetType == typeof(float)) return value == null ? 0f : value.FloatValue();
 			if (targetType == typeof(int)) return value == null ? 0 : value.IntValue();
-			if (targetType == typeof(long)) return value == null ? 0L : (long)value.IntValue();
+			if (targetType == typeof(long)) return value == null ? 0L : (long)value.DoubleValue();
+			if (targetType == typeof(uint)) return value == null ? 0U : value.UIntValue();
+			if (targetType == typeof(ulong)) return value == null ? 0UL : (ulong)value.DoubleValue();
 			if (targetType == typeof(bool)) return value != null && value.BoolValue();
 			if (targetType == typeof(short)) return value == null ? (short)0 : (short)value.IntValue();
-			if (targetType == typeof(byte)) return value == null ? (byte)0 : (byte)value.IntValue();
+			if (targetType == typeof(ushort)) return value == null ? (ushort)0 : (ushort)value.UIntValue();
+			if (targetType == typeof(byte)) return value == null ? (byte)0 : (byte)value.UIntValue();
 
 			if (typeof(Value).IsAssignableFrom(targetType)) {
 				if (value == null) return null;
