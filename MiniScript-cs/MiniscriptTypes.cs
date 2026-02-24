@@ -61,13 +61,21 @@ namespace Miniscript {
 		/// <summary>
 		/// Get the numeric value of this Value as an integer.
 		/// </summary>
-		/// <returns>this value, as signed integer</returns>
-		public virtual int IntValue() {
-			return (int)DoubleValue();
-		}
-		
-		/// <summary>
-		/// Get the numeric value of this Value as an unsigned integer.
+			/// <returns>this value, as signed integer</returns>
+			public virtual int IntValue() {
+				return (int)DoubleValue();
+			}
+
+			/// <summary>
+			/// Get the numeric value of this Value as a signed long integer.
+			/// </summary>
+			/// <returns>this value, as signed long</returns>
+			public virtual long LongValue() {
+				return (long)DoubleValue();
+			}
+			
+			/// <summary>
+			/// Get the numeric value of this Value as an unsigned integer.
 		/// </summary>
 		/// <returns>this value, as unsigned int</returns>
 		public virtual uint UIntValue() {

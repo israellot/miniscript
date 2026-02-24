@@ -939,7 +939,7 @@ namespace Miniscript {
 		public class Machine {
 			public WeakReference interpreter;		// interpreter hosting this machine
 			public TextOutputMethod standardOutput;	// where print() results should go
-			public bool storeImplicit = false;		// whether to store implicit values (e.g. for REPL)
+			public bool storeImplicit = true;		// always keep implicit results available
 			public ValMap functionType;
 			public ValMap listType;
 				public ValMap mapType;
@@ -1132,10 +1132,8 @@ namespace Miniscript {
 				}
 				if (line.op == Line.Op.AssignImplicit) {
 					Value val = line.Evaluate(context);
-					if (storeImplicit) {
-						context.StoreValue(ValVar.implicitResult, val);
-						context.implicitResultCounter++;
-					}
+					context.StoreValue(ValVar.implicitResult, val);
+					context.implicitResultCounter++;
 					return default;
 				}
 
@@ -1195,10 +1193,8 @@ namespace Miniscript {
 					PopContext();
 				} else if (line.op == Line.Op.AssignImplicit) {
 					Value val = line.Evaluate(context);
-					if (storeImplicit) {
-						context.StoreValue(ValVar.implicitResult, val);
-						context.implicitResultCounter++;
-					}
+					context.StoreValue(ValVar.implicitResult, val);
+					context.implicitResultCounter++;
 				} else {
 					Value val = line.Evaluate(context);
 					context.StoreValue(line.lhs, val);
