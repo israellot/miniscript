@@ -191,7 +191,7 @@ namespace Miniscript {
 			/// Evaluate this line and return the value that would be stored
 			/// into the lhs.
 			/// </summary>
-			public Value Evaluate(Context context) {
+				public Value Evaluate(Context context) {
 				if (op == Op.AssignA || op == Op.ReturnA || op == Op.AssignImplicit) {
 					// Assignment is a bit of a special case.  It's EXTREMELY common
 					// in TAC, so needs to be efficient, but we have to watch out for
@@ -222,13 +222,25 @@ namespace Miniscript {
 					}
 				}
 
-				Value opA = rhsA!=null ? rhsA.Val(context) : null;
-				Value opB = rhsB!=null ? rhsB.Val(context) : null;
+					Value opA = rhsA!=null ? rhsA.Val(context) : null;
+					Value opB = rhsB!=null ? rhsB.Val(context) : null;
 
-				if (op == Op.AisaB) {
-					if (opA == null) return ValNumber.Truth(opB == null);
-					return ValNumber.Truth(opA.IsA(opB, context.vm));
-				}
+					// In compatibility mode, treat bool as 1/0 for arithmetic and comparison
+					// operators so older scripts continue to behave the same way.
+					if (context.vm.legacyNumericBooleans) {
+						bool numericOp = (op == Op.APlusB || op == Op.AMinusB || op == Op.ATimesB || op == Op.ADividedByB
+							|| op == Op.AModB || op == Op.APowB || op == Op.AEqualB || op == Op.ANotEqualB
+							|| op == Op.AGreaterThanB || op == Op.AGreatOrEqualB || op == Op.ALessThanB || op == Op.ALessOrEqualB);
+						if (numericOp) {
+							if (opA is ValBool) opA = ValNumber.Truth(((ValBool)opA).value);
+							if (opB is ValBool) opB = ValNumber.Truth(((ValBool)opB).value);
+						}
+					}
+
+					if (op == Op.AisaB) {
+						if (opA == null) return ValBool.Truth(opB == null);
+						return ValBool.Truth(opA.IsA(opB, context.vm));
+					}
 
 				if (op == Op.NewA) {
 					// Create a new map, and set __isa on it to operand A (after 
@@ -239,11 +251,13 @@ namespace Miniscript {
 						throw new RuntimeException("invalid use of 'new'; to create a string, use quotes, e.g. \"foo\"");
 					} else if (opA == context.vm.listType) {
 						throw new RuntimeException("invalid use of 'new'; to create a list, use square brackets, e.g. [1,2]");
-					} else if (opA == context.vm.numberType) {
-						throw new RuntimeException("invalid use of 'new'; to create a number, use a numeric literal, e.g. 42");
-					} else if (opA == context.vm.functionType) {
-						throw new RuntimeException("invalid use of 'new'; to create a function, use the 'function' keyword");
-					}
+						} else if (opA == context.vm.numberType) {
+							throw new RuntimeException("invalid use of 'new'; to create a number, use a numeric literal, e.g. 42");
+						} else if (opA == context.vm.boolType) {
+							throw new RuntimeException("invalid use of 'new'; to create a boolean, use true or false");
+						} else if (opA == context.vm.functionType) {
+							throw new RuntimeException("invalid use of 'new'; to create a function, use the 'function' keyword");
+						}
 					ValMap newMap = new ValMap();
 					newMap.SetElem(ValString.magicIsA, opA);
 					return newMap;
@@ -256,13 +270,13 @@ namespace Miniscript {
 					return ValSeqElem.Resolve(opA, ((ValString)opB).value, context, out ignored);
 				}
 
-				// check for special cases of comparison to null (works with any type)
-				if (op == Op.AEqualB && (opA == null || opB == null)) {
-					return ValNumber.Truth(opA == opB);
-				}
-				if (op == Op.ANotEqualB && (opA == null || opB == null)) {
-					return ValNumber.Truth(opA != opB);
-				}
+					// check for special cases of comparison to null (works with any type)
+					if (op == Op.AEqualB && (opA == null || opB == null)) {
+						return ValBool.Truth(opA == opB);
+					}
+					if (op == Op.ANotEqualB && (opA == null || opB == null)) {
+						return ValBool.Truth(opA != opB);
+					}
 				
 				// check for implicit coersion of other types to string; this happens
 				// when either side is a string and the operator is addition.
@@ -314,12 +328,13 @@ namespace Miniscript {
 						context.partialResult = result;
 						context.lineNum--;
 						return null;
-					case Op.NotA:
-						return new ValNumber(1.0 - AbsClamp01(fA));
-					}
-					if (opB is ValNumber || opB == null) {
-						double fB = opB != null ? ((ValNumber)opB).value : 0;
-						switch (op) {
+						case Op.NotA:
+							if (context.vm.legacyNumericBooleans) return new ValNumber(1.0 - AbsClamp01(fA));
+							return ValBool.Truth(!(opA != null && opA.BoolValue()));
+						}
+						if (opB is ValNumber || opB == null) {
+							double fB = opB != null ? ((ValNumber)opB).value : 0;
+							switch (op) {
 						case Op.APlusB:
 							return new ValNumber(fA + fB);
 						case Op.AMinusB:
@@ -332,44 +347,50 @@ namespace Miniscript {
 							return new ValNumber(fA % fB);
 						case Op.APowB:
 							return new ValNumber(Math.Pow(fA, fB));
-						case Op.AEqualB:
-							return ValNumber.Truth(fA == fB);
-						case Op.ANotEqualB:
-							return ValNumber.Truth(fA != fB);
-						case Op.AGreaterThanB:
-							return ValNumber.Truth(fA > fB);
-						case Op.AGreatOrEqualB:
-							return ValNumber.Truth(fA >= fB);
-						case Op.ALessThanB:
-							return ValNumber.Truth(fA < fB);
-						case Op.ALessOrEqualB:
-							return ValNumber.Truth(fA <= fB);
-						case Op.AAndB:
-							if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
-							return new ValNumber(AbsClamp01(fA * fB));
-						case Op.AOrB:
-							if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
-							return new ValNumber(AbsClamp01(fA + fB - fA * fB));
-						default:
-							break;
+							case Op.AEqualB:
+								return ValBool.Truth(fA == fB);
+							case Op.ANotEqualB:
+								return ValBool.Truth(fA != fB);
+							case Op.AGreaterThanB:
+								return ValBool.Truth(fA > fB);
+							case Op.AGreatOrEqualB:
+								return ValBool.Truth(fA >= fB);
+							case Op.ALessThanB:
+								return ValBool.Truth(fA < fB);
+							case Op.ALessOrEqualB:
+								return ValBool.Truth(fA <= fB);
+							case Op.AAndB:
+								if (context.vm.legacyNumericBooleans) {
+									if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
+									return new ValNumber(AbsClamp01(fA * fB));
+								}
+								return ValBool.Truth((opA != null && opA.BoolValue()) && (opB != null && opB.BoolValue()));
+							case Op.AOrB:
+								if (context.vm.legacyNumericBooleans) {
+									if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
+									return new ValNumber(AbsClamp01(fA + fB - fA * fB));
+								}
+								return ValBool.Truth((opA != null && opA.BoolValue()) || (opB != null && opB.BoolValue()));
+							default:
+								break;
+							}
 						}
-					}
-					// Handle equality testing between a number (opA) and a non-number (opB).
-					// These are always considered unequal.
-					if (op == Op.AEqualB) return ValNumber.zero;
-					if (op == Op.ANotEqualB) return ValNumber.one;
+						// Handle equality testing between a number (opA) and a non-number (opB).
+						// These are always considered unequal.
+						if (op == Op.AEqualB) return ValBool.False;
+						if (op == Op.ANotEqualB) return ValBool.True;
 
-				} else if (opA is ValString) {
+					} else if (opA is ValString) {
 					string sA = ((ValString)opA).value;
-					if (op == Op.ATimesB || op == Op.ADividedByB) {
-						double factor = 0;
-						if (op == Op.ATimesB) {
-							Check.Type(opB, typeof(ValNumber), "string replication");
-							factor = ((ValNumber)opB).value;
-						} else {
-							Check.Type(opB, typeof(ValNumber), "string division");
-							factor = 1.0 / ((ValNumber)opB).value;								
-						}
+						if (op == Op.ATimesB || op == Op.ADividedByB) {
+							double factor = 0;
+							if (op == Op.ATimesB) {
+								Check.Type(opB, typeof(ValNumber), "string replication");
+								factor = opB.DoubleValue();
+							} else {
+								Check.Type(opB, typeof(ValNumber), "string division");
+								factor = 1.0 / opB.DoubleValue();								
+							}
 						if (double.IsNaN(factor) || double.IsInfinity(factor)) return null;
 						if (factor <= 0) return ValString.empty;
 						int repeats = (int)factor;
@@ -391,23 +412,23 @@ namespace Miniscript {
 									if (sA.EndsWith(sB)) sA = sA.Substring(0, sA.Length - sB.Length);
 									return new ValString(sA);
 								}
-							case Op.NotA:
-								return ValNumber.Truth(string.IsNullOrEmpty(sA));
-							case Op.AEqualB:
-								return ValNumber.Truth(string.Equals(sA, sB));
-							case Op.ANotEqualB:
-								return ValNumber.Truth(!string.Equals(sA, sB));
-							case Op.AGreaterThanB:
-								return ValNumber.Truth(string.Compare(sA, sB, StringComparison.Ordinal) > 0);
-							case Op.AGreatOrEqualB:
-								return ValNumber.Truth(string.Compare(sA, sB, StringComparison.Ordinal) >= 0);
-							case Op.ALessThanB:
-								int foo = string.Compare(sA, sB, StringComparison.Ordinal);
-								return ValNumber.Truth(foo < 0);
-							case Op.ALessOrEqualB:
-								return ValNumber.Truth(string.Compare(sA, sB, StringComparison.Ordinal) <= 0);
-							case Op.LengthOfA:
-								return new ValNumber(sA.Length);
+								case Op.NotA:
+									return ValBool.Truth(string.IsNullOrEmpty(sA));
+								case Op.AEqualB:
+									return ValBool.Truth(string.Equals(sA, sB));
+								case Op.ANotEqualB:
+									return ValBool.Truth(!string.Equals(sA, sB));
+								case Op.AGreaterThanB:
+									return ValBool.Truth(string.Compare(sA, sB, StringComparison.Ordinal) > 0);
+								case Op.AGreatOrEqualB:
+									return ValBool.Truth(string.Compare(sA, sB, StringComparison.Ordinal) >= 0);
+								case Op.ALessThanB:
+									int foo = string.Compare(sA, sB, StringComparison.Ordinal);
+									return ValBool.Truth(foo < 0);
+								case Op.ALessOrEqualB:
+									return ValBool.Truth(string.Compare(sA, sB, StringComparison.Ordinal) <= 0);
+								case Op.LengthOfA:
+									return new ValNumber(sA.Length);
 							default:
 								break;
 						}
@@ -416,20 +437,20 @@ namespace Miniscript {
 						// We no longer automatically coerce in all these cases; about
 						// all we can do is equal or unequal testing.
 						// (Note that addition was handled way above here.)
-						if (op == Op.AEqualB) return ValNumber.zero;
-						if (op == Op.ANotEqualB) return ValNumber.one;						
-					}
-				} else if (opA is ValList) {
+							if (op == Op.AEqualB) return ValBool.False;
+							if (op == Op.ANotEqualB) return ValBool.True;						
+						}
+					} else if (opA is ValList) {
 					List<Value> list = ((ValList)opA).values;
 					if (op == Op.ElemBofA || op == Op.ElemBofIterA) {
 						// list indexing
 						return ((ValList)opA).GetElem(opB);
 					} else if (op == Op.LengthOfA) {
 						return new ValNumber(list.Count);
-					} else if (op == Op.AEqualB) {
-						return ValNumber.Truth(((ValList)opA).Equality(opB));
-					} else if (op == Op.ANotEqualB) {
-						return ValNumber.Truth(1.0 - ((ValList)opA).Equality(opB));
+						} else if (op == Op.AEqualB) {
+							return ValBool.Truth(((ValList)opA).Equality(opB) >= 1);
+						} else if (op == Op.ANotEqualB) {
+							return ValBool.Truth(((ValList)opA).Equality(opB) < 1);
 					} else if (op == Op.APlusB) {
 						// list concatenation
 						Check.Type(opB, typeof(ValList), "list concatenation");
@@ -439,16 +460,16 @@ namespace Miniscript {
 						foreach (Value v in list) result.Add(context.ValueInContext(v));
 						foreach (Value v in list2) result.Add(context.ValueInContext(v));
 						return new ValList(result);
-					} else if (op == Op.ATimesB || op == Op.ADividedByB) {
-						// list replication (or division)
-						double factor = 0;
-						if (op == Op.ATimesB) {
-							Check.Type(opB, typeof(ValNumber), "list replication");
-							factor = ((ValNumber)opB).value;
-						} else {
-							Check.Type(opB, typeof(ValNumber), "list division");
-							factor = 1.0 / ((ValNumber)opB).value;								
-						}
+						} else if (op == Op.ATimesB || op == Op.ADividedByB) {
+							// list replication (or division)
+							double factor = 0;
+							if (op == Op.ATimesB) {
+								Check.Type(opB, typeof(ValNumber), "list replication");
+								factor = opB.DoubleValue();
+							} else {
+								Check.Type(opB, typeof(ValNumber), "list division");
+								factor = 1.0 / opB.DoubleValue();								
+							}
 						if (double.IsNaN(factor) || double.IsInfinity(factor)) return null;
 						if (factor <= 0) return new ValList();
 						int finalCount = (int)(list.Count * factor);
@@ -458,10 +479,10 @@ namespace Miniscript {
 							result.Add(context.ValueInContext(list[i % list.Count]));
 						}
 						return new ValList(result);
-					} else if (op == Op.NotA) {
-						return ValNumber.Truth(!opA.BoolValue());
-					}
-				} else if (opA is ValMap) {
+						} else if (op == Op.NotA) {
+							return ValBool.Truth(!opA.BoolValue());
+						}
+					} else if (opA is ValMap) {
 					if (op == Op.ElemBofA) {
 						// map lookup
 						// (note, cases where opB is a string are handled above, along with
@@ -475,10 +496,10 @@ namespace Miniscript {
 						return ((ValMap)opA).GetKeyValuePair(opB.IntValue());
 					} else if (op == Op.LengthOfA) {
 						return new ValNumber(((ValMap)opA).Count);
-					} else if (op == Op.AEqualB) {
-						return ValNumber.Truth(((ValMap)opA).Equality(opB));
-					} else if (op == Op.ANotEqualB) {
-						return ValNumber.Truth(1.0 - ((ValMap)opA).Equality(opB));
+						} else if (op == Op.AEqualB) {
+							return ValBool.Truth(((ValMap)opA).Equality(opB) >= 1);
+						} else if (op == Op.ANotEqualB) {
+							return ValBool.Truth(((ValMap)opA).Equality(opB) < 1);
 					} else if (op == Op.APlusB) {
 						// map combination
 						Dictionary<Value, Value> map = ((ValMap)opA).map;
@@ -488,19 +509,49 @@ namespace Miniscript {
 						foreach (KeyValuePair<Value, Value> kv in map) result.map[kv.Key] = context.ValueInContext(kv.Value);
 						foreach (KeyValuePair<Value, Value> kv in map2) result.map[kv.Key] = context.ValueInContext(kv.Value);
 						return result;
-					} else if (op == Op.NotA) {
-						return ValNumber.Truth(!opA.BoolValue());
-					}
-				} else if (opA is ValFunction && opB is ValFunction) {
-					Function fA = ((ValFunction)opA).function;
-					Function fB = ((ValFunction)opB).function;
-					switch (op) {
-					case Op.AEqualB:
-						return ValNumber.Truth(fA == fB);
-					case Op.ANotEqualB:
-						return ValNumber.Truth(fA != fB);
-					}
-				} else {
+						} else if (op == Op.NotA) {
+							return ValBool.Truth(!opA.BoolValue());
+						}
+					} else if (opA is ValBool && opB is ValBool) {
+						bool bA = ((ValBool)opA).value;
+						bool bB = ((ValBool)opB).value;
+						switch (op) {
+						case Op.AEqualB:
+							return ValBool.Truth(bA == bB);
+						case Op.ANotEqualB:
+							return ValBool.Truth(bA != bB);
+						case Op.AGreaterThanB:
+							return ValBool.Truth((bA ? 1 : 0) > (bB ? 1 : 0));
+						case Op.AGreatOrEqualB:
+							return ValBool.Truth((bA ? 1 : 0) >= (bB ? 1 : 0));
+						case Op.ALessThanB:
+							return ValBool.Truth((bA ? 1 : 0) < (bB ? 1 : 0));
+						case Op.ALessOrEqualB:
+							return ValBool.Truth((bA ? 1 : 0) <= (bB ? 1 : 0));
+						case Op.AAndB:
+							return ValBool.Truth(bA && bB);
+						case Op.AOrB:
+							return ValBool.Truth(bA || bB);
+						}
+					} else if (opA is ValBool) {
+						switch (op) {
+						case Op.NotA:
+							return ValBool.Truth(!((ValBool)opA).value);
+						case Op.AEqualB:
+							return ValBool.False;
+						case Op.ANotEqualB:
+							return ValBool.True;
+						}
+					} else if (opA is ValFunction && opB is ValFunction) {
+						Function fA = ((ValFunction)opA).function;
+						Function fB = ((ValFunction)opB).function;
+						switch (op) {
+						case Op.AEqualB:
+							return ValBool.Truth(fA == fB);
+						case Op.ANotEqualB:
+							return ValBool.Truth(fA != fB);
+						}
+					} else {
 					// opA is something else... perhaps null
 					switch (op) {
 					case Op.BindAssignA:
@@ -509,9 +560,9 @@ namespace Miniscript {
 							ValFunction valFunc = (ValFunction)opA;
                             return valFunc.BindAndCopy(context.variables);
 						}
-					case Op.NotA:
-						return opA != null && opA.BoolValue() ? ValNumber.zero : ValNumber.one;
-					case Op.ElemBofA:
+						case Op.NotA:
+							return ValBool.Truth(!(opA != null && opA.BoolValue()));
+						case Op.ElemBofA:
 						if (opA is null) {
 							throw new TypeException("Null Reference Exception: can't index into null");
 						} else {
@@ -521,23 +572,27 @@ namespace Miniscript {
 				}
 				
 
-				if (op == Op.AAndB || op == Op.AOrB) {
-					// We already handled the case where opA was a number above;
-					// this code handles the case where opA is something else.
-					double fA = opA != null && opA.BoolValue() ? 1 : 0;
-					double fB;
-					if (opB is ValNumber) fB = ((ValNumber)opB).value;
-					else fB = opB != null && opB.BoolValue() ? 1 : 0;
-					double result;
-					if (op == Op.AAndB) {
-						result = AbsClamp01(fA * fB);
-					} else {
-						result = AbsClamp01(fA + fB - fA * fB);
+					if (op == Op.AAndB || op == Op.AOrB) {
+						// We already handled the case where opA was a number above;
+						// this code handles the case where opA is something else.
+						double fA = opA != null && opA.BoolValue() ? 1 : 0;
+						double fB;
+						if (opB is ValNumber) fB = ((ValNumber)opB).value;
+						else fB = opB != null && opB.BoolValue() ? 1 : 0;
+						if (context.vm.legacyNumericBooleans && opB is ValNumber) {
+							double result;
+							if (op == Op.AAndB) {
+								result = AbsClamp01(fA * fB);
+							} else {
+								result = AbsClamp01(fA + fB - fA * fB);
+							}
+							return new ValNumber(result);
+						}
+						if (op == Op.AAndB) return ValBool.Truth((opA != null && opA.BoolValue()) && (opB != null && opB.BoolValue()));
+						return ValBool.Truth((opA != null && opA.BoolValue()) || (opB != null && opB.BoolValue()));
 					}
-					return new ValNumber(result);
+					return null;
 				}
-				return null;
-			}
 
 			static double AbsClamp01(double d) {
 				if (d < 0) d = -d;
@@ -898,10 +953,12 @@ namespace Miniscript {
 			public bool yielding = false;			// set to true by yield intrinsic
 			public ValMap functionType;
 			public ValMap listType;
-			public ValMap mapType;
-			public ValMap numberType;
-			public ValMap stringType;
-			public ValMap versionMap;
+				public ValMap mapType;
+				public ValMap numberType;
+				public ValMap boolType;
+				public ValMap stringType;
+				public ValMap versionMap;
+				public bool legacyNumericBooleans = true;
 			
 			public Context globalContext {			// contains global variables
 				get { return _globalContext; }

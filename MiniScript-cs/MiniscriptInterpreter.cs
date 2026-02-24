@@ -54,13 +54,20 @@ namespace Miniscript {
 		/// </summary>
 		public TextOutputMethod errorOutput;
 		
-		/// <summary>
-		/// hostData is just a convenient place for you to attach some arbitrary
-		/// data to the interpreter.  It gets passed through to the context object,
-		/// so you can access it inside your custom intrinsic functions.  Use it
-		/// for whatever you like (or don't, if you don't feel the need).
-		/// </summary>
-		public object hostData;
+			/// <summary>
+			/// hostData is just a convenient place for you to attach some arbitrary
+			/// data to the interpreter.  It gets passed through to the context object,
+			/// so you can access it inside your custom intrinsic functions.  Use it
+			/// for whatever you like (or don't, if you don't feel the need).
+			/// </summary>
+			public object hostData;
+
+			/// <summary>
+			/// Whether to preserve the legacy behavior where logical operators on
+			/// numbers can produce non-boolean numeric truth values (e.g. 0.5).
+			/// Default is true for backward compatibility.
+			/// </summary>
+			public bool legacyNumericBooleans = true;
 		
 		/// <summary>
 		/// done: returns true when we don't have a virtual machine, or we do have
@@ -130,11 +137,12 @@ namespace Miniscript {
 			if (vm != null) return;	// already compiled
 
 			if (parser == null) parser = new Parser();
-			try {
-				parser.Parse(source);
-				vm = parser.CreateVM(standardOutput);
-				vm.interpreter = new WeakReference(this);
-			} catch (MiniscriptException mse) {
+				try {
+					parser.Parse(source);
+					vm = parser.CreateVM(standardOutput);
+					vm.legacyNumericBooleans = legacyNumericBooleans;
+					vm.interpreter = new WeakReference(this);
+				} catch (MiniscriptException mse) {
 				ReportError(mse);
 				if (vm == null) parser = null;
 			}
@@ -214,10 +222,11 @@ namespace Miniscript {
 		/// <param name="timeLimit">Time limit.</param>
 		public void REPL(string sourceLine, double timeLimit=60) {
 			if (parser == null) parser = new Parser();
-			if (vm == null) {
-				vm = parser.CreateVM(standardOutput);
-				vm.interpreter = new WeakReference(this);
-			} else if (vm.done && !parser.NeedMoreInput()) {
+				if (vm == null) {
+					vm = parser.CreateVM(standardOutput);
+					vm.legacyNumericBooleans = legacyNumericBooleans;
+					vm.interpreter = new WeakReference(this);
+				} else if (vm.done && !parser.NeedMoreInput()) {
 				// Since the machine and parser are both done, we don't really need the
 				// previously-compiled code.  So let's clear it out, as a memory optimization.
 				vm.GetTopContext().ClearCodeAndTemps();

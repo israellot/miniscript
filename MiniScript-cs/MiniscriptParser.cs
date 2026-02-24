@@ -763,13 +763,13 @@ namespace Miniscript {
 			// Now, if we have any short-circuit jumps, those are going to need
 			// to copy the short-circuit result (always 1) to our output temp.
 			// And anything else needs to skip over that.  So:
-			if (jumpLines != null) {
-				output.Add(new TAC.Line(null, TAC.Line.Op.GotoA, TAC.Num(output.code.Count+2)));	// skip over this line:
-				output.Add(new TAC.Line(val, TAC.Line.Op.AssignA, ValNumber.one));	// result = 1
-				foreach (TAC.Line jump in jumpLines) {
-					jump.rhsA = TAC.Num(output.code.Count-1);	// short-circuit to the above result=1 line
+				if (jumpLines != null) {
+					output.Add(new TAC.Line(null, TAC.Line.Op.GotoA, TAC.Num(output.code.Count+2)));	// skip over this line:
+					output.Add(new TAC.Line(val, TAC.Line.Op.AssignA, ValBool.True));	// result = true
+					foreach (TAC.Line jump in jumpLines) {
+						jump.rhsA = TAC.Num(output.code.Count-1);	// short-circuit to the above result=1 line
+					}
 				}
-			}
 
 			return val;
 		}
@@ -803,13 +803,13 @@ namespace Miniscript {
 			// Now, if we have any short-circuit jumps, those are going to need
 			// to copy the short-circuit result (always 0) to our output temp.
 			// And anything else needs to skip over that.  So:
-			if (jumpLines != null) {
-				output.Add(new TAC.Line(null, TAC.Line.Op.GotoA, TAC.Num(output.code.Count+2)));	// skip over this line:
-				output.Add(new TAC.Line(val, TAC.Line.Op.AssignA, ValNumber.zero));	// result = 0
-				foreach (TAC.Line jump in jumpLines) {
-					jump.rhsA = TAC.Num(output.code.Count-1);	// short-circuit to the above result=0 line
+				if (jumpLines != null) {
+					output.Add(new TAC.Line(null, TAC.Line.Op.GotoA, TAC.Num(output.code.Count+2)));	// skip over this line:
+					output.Add(new TAC.Line(val, TAC.Line.Op.AssignA, ValBool.False));	// result = false
+					foreach (TAC.Line jump in jumpLines) {
+						jump.rhsA = TAC.Num(output.code.Count-1);	// short-circuit to the above result=0 line
+					}
 				}
-			}
 
 			return val;
 		}
@@ -1236,13 +1236,13 @@ namespace Miniscript {
 					result.localOnly = (output.localOnlyStrict ? ValVar.LocalOnlyMode.Strict : ValVar.LocalOnlyMode.Warn);
 				}
 				return result;
-			} else if (tok.type == Token.Type.Keyword) {
-				switch (tok.text) {
-				case "null":	return null;
-				case "true":	return ValNumber.one;
-				case "false":	return ValNumber.zero;
+				} else if (tok.type == Token.Type.Keyword) {
+					switch (tok.text) {
+					case "null":	return null;
+					case "true":	return ValBool.True;
+					case "false":	return ValBool.False;
+					}
 				}
-			}
 			throw new CompilerException(string.Format("got {0} where number, string, or identifier is required", tok));
 		}
 

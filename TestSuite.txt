@@ -2081,3 +2081,27 @@ VALUE_3
 15
 25
 35
+======================================================================
+==== Boolean literals and logic
+print true
+print false
+print not true
+print true and false
+print true or false
+----------------------------------------------------------------------
+1
+0
+0
+0
+1
+======================================================================
+==== Boolean comparisons
+print true == true
+print true != false
+print false < true
+print false >= true
+----------------------------------------------------------------------
+1
+1
+1
+0

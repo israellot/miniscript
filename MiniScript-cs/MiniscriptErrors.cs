@@ -177,6 +177,7 @@ namespace Miniscript {
 		}
 		
 		public static void Type(Value val, System.Type requiredType, string desc=null) {
+			if (requiredType == typeof(ValNumber) && val is ValBool) return;
 			if (!requiredType.IsInstanceOfType(val)) {
 				string typeStr = val == null ? "null" : "a " + val.GetType();
 				throw new TypeException(string.Format("got {0} where a {1} was required{2}",

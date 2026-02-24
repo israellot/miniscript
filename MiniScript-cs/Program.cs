@@ -4,6 +4,7 @@ using System.IO;
 using System.Collections.Generic;
 
 class MainClass {
+	static bool legacyNumericBooleans = true;
 
 	static void Print(string s, bool lineBreak=true) {
 		if (lineBreak) Console.WriteLine(s);
@@ -31,6 +32,7 @@ class MainClass {
 //		Console.WriteLine(string.Join("\n", expectedOutput));
 
 		Interpreter miniscript = new Interpreter(sourceLines);
+		miniscript.legacyNumericBooleans = legacyNumericBooleans;
 		List<string> actualOutput = new List<string>();
 		miniscript.standardOutput = (string s, bool eol) => actualOutput.Add(s);
 		miniscript.errorOutput = miniscript.standardOutput;
@@ -100,6 +102,18 @@ class MainClass {
 		Print("\nIntegration tests complete.\n");
 	}
 
+	static void RunStrictBoolSmokeTests() {
+		Print("Running strict-bool smoke tests.\n");
+		bool oldMode = legacyNumericBooleans;
+		legacyNumericBooleans = false;
+		Test(new List<string> { "print true and false", "print not false", "print true == true" }, 1,
+			new List<string> { "false", "true", "true" }, 1);
+		Test(new List<string> { "print 0.5 and 0.5", "print 0.5 or 0.5" }, 1,
+			new List<string> { "true", "true" }, 1);
+		legacyNumericBooleans = oldMode;
+		Print("Strict-bool smoke tests complete.\n");
+	}
+
 	static void RunFile(string path, bool dumpTAC=false) {
 		StreamReader file = new StreamReader(path);
 		if (file == null) {
@@ -111,6 +125,7 @@ class MainClass {
 		while (!file.EndOfStream) sourceLines.Add(file.ReadLine());
 
 		Interpreter miniscript = new Interpreter(sourceLines);
+		miniscript.legacyNumericBooleans = legacyNumericBooleans;
 		miniscript.standardOutput = (string s, bool eol) => Print(s, eol);
 		miniscript.implicitOutput = miniscript.standardOutput;
 		miniscript.Compile();
@@ -126,12 +141,18 @@ class MainClass {
 	}
 
 	public static void Main(string[] args) {
+		var positionalArgs = new List<string>();
+		foreach (var arg in args) {
+			if (arg == "--strict-bool") legacyNumericBooleans = false;
+			else if (arg == "--legacy-bool") legacyNumericBooleans = true;
+			else positionalArgs.Add(arg);
+		}
 
-		if (args.Length > 0 && args[0] == "--test") {
+		if (positionalArgs.Count > 0 && positionalArgs[0] == "--test") {
 			Miniscript.HostInfo.name = "Test harness";
 
-			if (args.Length > 1 && args[1] == "--integration") {
-				var file = args.Length < 3 || string.IsNullOrEmpty(args[2]) ? "../../../TestSuite.txt" : args[2];
+			if (positionalArgs.Count > 1 && positionalArgs[1] == "--integration") {
+				var file = positionalArgs.Count < 3 || string.IsNullOrEmpty(positionalArgs[2]) ? "../../../TestSuite.txt" : positionalArgs[2];
 				Print("Running test suite.\n");
 				RunTestSuite(file);
 				return;
@@ -141,6 +162,11 @@ class MainClass {
 
 			Print("Running unit tests.\n");
 			UnitTest.Run();
+			if (UnitTest.HasFailures) {
+				Print("Unit tests reported failures.\n");
+				Environment.ExitCode = 1;
+			}
+			RunStrictBoolSmokeTests();
 
 			Print("\n");
 
@@ -159,12 +185,13 @@ class MainClass {
 			return;
 		}
 
-		if (args.Length > 0) {
-			RunFile(args[0]);
+		if (positionalArgs.Count > 0) {
+			RunFile(positionalArgs[0]);
 			return;
 		}
 		
 		Interpreter repl = new Interpreter();
+		repl.legacyNumericBooleans = legacyNumericBooleans;
 		repl.implicitOutput = repl.standardOutput;
 
 		while (true) {

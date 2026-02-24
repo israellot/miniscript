@@ -231,3 +231,6 @@ Version 1.6.1: Jun 29, 2023
 (Not Yet Released)
 ==================
 - Fixed [C# only]: bug causing map.indexOf to bail out and return null if it hits a null value before the value being sought.
+- New [C# only]: introduced a native boolean value type with `true`/`false` literals and boolean results from logical/comparison operators.
+- New [C# only]: added `bool` as a core type map, usable with `isa`.
+- New [C# only]: command-line option `--strict-bool` to disable legacy numeric truth-value behavior in `and`, `or`, and `not`.

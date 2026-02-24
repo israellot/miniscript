@@ -168,6 +168,13 @@ namespace Miniscript {
 				if (fx > fy) return 1;
 				return 0;
 			}
+			// If both arguments are booleans, compare false < true.
+			if (x is ValBool && y is ValBool) {
+				bool bx = ((ValBool)x).value;
+				bool by = ((ValBool)y).value;
+				if (bx == by) return 0;
+				return bx ? 1 : -1;
+			}
 			// Otherwise, consider all values equal, for sorting purposes.
 			return 0;
 		}
@@ -304,7 +311,7 @@ namespace Miniscript {
 	/// ValNull is an object to represent null in places where we can't use
 	/// an actual null (such as a dictionary key or value).
 	/// </summary>
-	public class ValNull : Value {
+		public class ValNull : Value {
 		private ValNull() {}
 		
 		public override string ToString(TAC.Machine machine) {
@@ -355,13 +362,63 @@ namespace Miniscript {
 		/// </summary>
 		public static ValNull instance { get { return _inst; } }
 		
-	}
-	
-	/// <summary>
-	/// ValNumber represents a numeric (double-precision floating point) value in MiniScript.
-	/// Since we also use numbers to represent boolean values, ValNumber does that job too.
-	/// </summary>
-	public class ValNumber : Value {
+		}
+
+		/// <summary>
+		/// ValBool represents a boolean value in MiniScript.
+		/// </summary>
+		public class ValBool : Value {
+			public bool value;
+
+			public ValBool(bool value) {
+				this.value = value;
+			}
+
+			public override string ToString(TAC.Machine vm) {
+				if (vm != null && vm.legacyNumericBooleans) return value ? "1" : "0";
+				return value ? "true" : "false";
+			}
+
+			public override int IntValue() {
+				return value ? 1 : 0;
+			}
+
+			public override double DoubleValue() {
+				return value ? 1.0 : 0.0;
+			}
+
+			public override bool BoolValue() {
+				return value;
+			}
+
+			public override bool IsA(Value type, TAC.Machine vm) {
+				if (type == null) return false;
+				return type == vm.boolType;
+			}
+
+			public override int Hash() {
+				return value ? 17 : 13;
+			}
+
+			public override double Equality(Value rhs) {
+				return rhs is ValBool && ((ValBool)rhs).value == value ? 1 : 0;
+			}
+
+			static ValBool _false = new ValBool(false);
+			static ValBool _true = new ValBool(true);
+
+			public static ValBool False { get { return _false; } }
+			public static ValBool True { get { return _true; } }
+
+			public static ValBool Truth(bool truthValue) {
+				return truthValue ? True : False;
+			}
+		}
+		
+		/// <summary>
+		/// ValNumber represents a numeric (double-precision floating point) value in MiniScript.
+		/// </summary>
+		public class ValNumber : Value {
 		public double value;
 
 		public ValNumber(double value) {
@@ -1196,6 +1253,9 @@ namespace Miniscript {
 					includeMapType = false;
 				} else if (sequence is ValFunction) {
 					sequence = context.vm.functionType ?? Intrinsics.FunctionType();
+					includeMapType = false;
+				} else if (sequence is ValBool) {
+					sequence = context.vm.boolType ?? Intrinsics.BoolType();
 					includeMapType = false;
 				} else {
 					throw new TypeException("Type Error (while attempting to look up " + identifier + ")");

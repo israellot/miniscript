@@ -217,13 +217,13 @@ namespace Miniscript {
 			/// Result.True: static Result representing true (1.0).
 			/// </summary>
 			public static Result True { get { return _true; } }
-			static Result _true = new Result(ValNumber.one, true);
-			
+			static Result _true = new Result(ValBool.True, true);
+
 			/// <summary>
 			/// Result.True: static Result representing false (0.0).
 			/// </summary>
 			public static Result False { get { return _false; } }
-			static Result _false = new Result(ValNumber.zero, true);
+			static Result _false = new Result(ValBool.False, true);
 			
 			/// <summary>
 			/// Result.Waiting: static Result representing a need to wait,
@@ -497,7 +497,7 @@ namespace Miniscript {
 				return new Intrinsic.Result(val.Hash());
 			};
 
-			// hasIndex
+				// hasIndex
 			//	Return whether the given index is valid for this object, that is,
 			//	whether it could be used with square brackets to get some value
 			//	from self.  When self is a list or string, the result is true for
@@ -520,19 +520,19 @@ namespace Miniscript {
 					if (index is ValNumber) {
 						List<Value> list = ((ValList)self).values;
 						int i = index.IntValue();
-						return new Intrinsic.Result(ValNumber.Truth(i >= -list.Count && i < list.Count));
+						return new Intrinsic.Result(ValBool.Truth(i >= -list.Count && i < list.Count));
 					}
 					return Intrinsic.Result.False;
-				} else if (self is ValString) {
+					} else if (self is ValString) {
 					if (index is ValNumber) {
 						string str = ((ValString)self).value;
 						int i = index.IntValue();
-						return new Intrinsic.Result(ValNumber.Truth(i >= -str.Length && i < str.Length));
+						return new Intrinsic.Result(ValBool.Truth(i >= -str.Length && i < str.Length));
 					}
-					return new Intrinsic.Result(ValNumber.zero);
-				} else if (self is ValMap) {
+						return Intrinsic.Result.False;
+					} else if (self is ValMap) {
 					ValMap map = (ValMap)self;
-					return new Intrinsic.Result(ValNumber.Truth(map.ContainsKey(index)));
+					return new Intrinsic.Result(ValBool.Truth(map.ContainsKey(index)));
 				}
 				return Intrinsic.Result.Null;
 			};
@@ -672,11 +672,10 @@ namespace Miniscript {
 			f = Intrinsic.Create("intrinsics");
 			f.code = (context, partialResult) => {
 				if (intrinsicsMap != null) return new Intrinsic.Result(intrinsicsMap);
-				intrinsicsMap = new ValMap();
-				intrinsicsMap.assignOverride = (k,v) => {
-					throw new RuntimeException("Assignment to protected map");
-					return true;
-				};
+					intrinsicsMap = new ValMap();
+					intrinsicsMap.assignOverride = (k,v) => {
+						throw new RuntimeException("Assignment to protected map");
+					};
 		
 				foreach (var intrinsic in Intrinsic.all) {
 					if (intrinsic == null || string.IsNullOrEmpty(intrinsic.name)) continue;
@@ -733,20 +732,34 @@ namespace Miniscript {
 				return Intrinsic.Result.Null;
 			};
 			
-			// list type
+				// list type
 			//	Returns a map that represents the list datatype in
 			//	MiniScript's core type system.  This can be used with `isa`
 			//	to check whether a variable refers to a list.  You can also
 			//	assign new methods here to make them available to all lists.
 			// Example: [1, 2, 3] isa list		returns 1
 			// See also: number, string, map, funcRef
-			f = Intrinsic.Create("list");
+				f = Intrinsic.Create("list");
 			f.code = (context, partialResult) => {
 				if (context.vm.listType == null) {
 					context.vm.listType = ListType().EvalCopy(context.vm.globalContext);
 				}
 				return new Intrinsic.Result(context.vm.listType);
-			};
+				};
+
+				// bool type
+				//	Returns a map that represents the bool datatype in
+				//	MiniScript's core type system.  This can be used with `isa`
+				//	to check whether a variable refers to a boolean.
+				// Example: true isa bool		returns true
+				// See also: number, string, list, map, funcRef
+				f = Intrinsic.Create("bool");
+				f.code = (context, partialResult) => {
+					if (context.vm.boolType == null) {
+						context.vm.boolType = BoolType().EvalCopy(context.vm.globalContext);
+					}
+					return new Intrinsic.Result(context.vm.boolType);
+				};
 			
 			// log(x, base)
 			//	Returns the logarithm (with the given) of the given number,
@@ -838,14 +851,14 @@ namespace Miniscript {
 			f = Intrinsic.Create("print");
 			f.AddParam("s", ValString.empty);
 			f.AddParam("delimiter");
-			f.code = (context, partialResult) => {
-				Value sVal = context.GetLocal("s");
-				string s = (sVal == null ? "null" : sVal.ToString());
-				Value delimiter = context.GetLocal("delimiter");
-				if (delimiter == null) context.vm.standardOutput(s, true);
-				else context.vm.standardOutput(s + delimiter.ToString(), false);
-				return Intrinsic.Result.Null;
-			};
+				f.code = (context, partialResult) => {
+					Value sVal = context.GetLocal("s");
+					string s = (sVal == null ? "null" : sVal.ToString(context.vm));
+					Value delimiter = context.GetLocal("delimiter");
+					if (delimiter == null) context.vm.standardOutput(s, true);
+					else context.vm.standardOutput(s + delimiter.ToString(context.vm), false);
+					return Intrinsic.Result.Null;
+				};
 				
 			// pop
 			//	Removes and	returns the last item in a list, or an arbitrary
@@ -912,7 +925,7 @@ namespace Miniscript {
 			// self (list or map): object to append an element to
 			// Returns: self
 			// See also: pop, pull, insert
-			f = Intrinsic.Create("push");
+				f = Intrinsic.Create("push");
 			f.AddParam("self");
 			f.AddParam("value");
 			f.code = (context, partialResult) => {
@@ -922,11 +935,11 @@ namespace Miniscript {
 					List<Value> list = ((ValList)self).values;
 					list.Add(value);
 					return new Intrinsic.Result(self);
-				} else if (self is ValMap) {
-					ValMap map = (ValMap)self;
-					map.map[value] = ValNumber.one;
-					return new Intrinsic.Result(self);
-				}
+					} else if (self is ValMap) {
+						ValMap map = (ValMap)self;
+						map.map[value] = ValBool.True;
+						return new Intrinsic.Result(self);
+					}
 				return Intrinsic.Result.Null;
 			};
 
@@ -992,7 +1005,7 @@ namespace Miniscript {
 				} else {
 					result = (a.Equality(b) >= 1);
 				}
-				return new Intrinsic.Result(ValNumber.Truth(result));
+					return new Intrinsic.Result(ValBool.Truth(result));
 			};
 
 			// remove
@@ -1247,10 +1260,10 @@ namespace Miniscript {
 			// Returns: self (which has been sorted in place)
 			// Example: a = [5,3,4,1,2]; a.sort		results in a == [1, 2, 3, 4, 5]
 			// See also: shuffle
-			f = Intrinsic.Create("sort");
-			f.AddParam("self");
-			f.AddParam("byKey");
-			f.AddParam("ascending", ValNumber.one);
+				f = Intrinsic.Create("sort");
+				f.AddParam("self");
+				f.AddParam("byKey");
+				f.AddParam("ascending", ValBool.True);
 			f.code = (context, partialResult) => {
 				Value self = context.self;
 				ValList list = self as ValList;
@@ -1490,12 +1503,13 @@ namespace Miniscript {
 			// Returns: numeric value of the given string
 			// Example: "1234.56".val		returns 1234.56
 			// See also: str
-			f = Intrinsic.Create("val");
-			f.AddParam("self", 0);
-			f.code = (context, partialResult) => {
-				Value val = context.self;
-				if (val is ValNumber) return new Intrinsic.Result(val);
-				if (val is ValString) {
+				f = Intrinsic.Create("val");
+				f.AddParam("self", 0);
+				f.code = (context, partialResult) => {
+					Value val = context.self;
+					if (val is ValNumber) return new Intrinsic.Result(val);
+					if (val is ValBool) return new Intrinsic.Result(val.IntValue());
+					if (val is ValString) {
 					double value = 0;
 					double.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out value);
 					return new Intrinsic.Result(value);
@@ -1697,17 +1711,28 @@ namespace Miniscript {
 		}
 		static ValMap _mapType = null;
 		
-		/// <summary>
-		/// NumberType: a static map that represents the Number type.
-		/// </summary>
-		public static ValMap NumberType() {
+			/// <summary>
+			/// NumberType: a static map that represents the Number type.
+			/// </summary>
+			public static ValMap NumberType() {
 			if (_numberType == null) {
 				_numberType = new ValMap();
 			}
 			return _numberType;
+			}
+			static ValMap _numberType = null;
+
+			/// <summary>
+			/// BoolType: a static map that represents the Bool type.
+			/// </summary>
+			public static ValMap BoolType() {
+				if (_boolType == null) {
+					_boolType = new ValMap();
+				}
+				return _boolType;
+			}
+			static ValMap _boolType = null;
+			
+			
 		}
-		static ValMap _numberType = null;
-		
-		
 	}
-}
