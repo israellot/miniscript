@@ -982,7 +982,6 @@ namespace Miniscript {
 			public WeakReference interpreter;		// interpreter hosting this machine
 			public TextOutputMethod standardOutput;	// where print() results should go
 			public bool storeImplicit = false;		// whether to store implicit values (e.g. for REPL)
-			public bool yielding = false;			// set to true by yield intrinsic
 			public ValMap functionType;
 			public ValMap listType;
 				public ValMap mapType;

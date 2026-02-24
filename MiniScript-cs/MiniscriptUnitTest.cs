@@ -118,6 +118,19 @@ namespace Miniscript {
 			await CheckOutput("m = {}\nm.push 42\nprint m[42]", true, "1").ConfigureAwait(false);
 			await CheckOutput("m = {}\nm.push 42\nprint m[42]", false, "true").ConfigureAwait(false);
 
+			// yield should await asynchronously and still complete in one RunUntilDone call.
+			await CheckOutput("print 1\nyield\nprint 2", false, "1", "2").ConfigureAwait(false);
+			await CheckOutput("print 1\ndelay 0\nprint 2", false, "1", "2").ConfigureAwait(false);
+			await CheckOutput("print 1\nwait 0\nprint 2", false, "1", "2").ConfigureAwait(false);
+			var syncOnlyDelay = new Interpreter("delay 0.01");
+			bool syncOnlyDelayThrew = false;
+			try {
+				syncOnlyDelay.RunUntilDoneSyncOnly();
+			} catch (RuntimeException) {
+				syncOnlyDelayThrew = true;
+			}
+			ErrorIf(!syncOnlyDelayThrew, "delay should throw in sync-only mode when delay > 0");
+
 			// Lambda factory should map lambda parameters to intrinsic args by name.
 			const string lambdaAddName = "__unit_lambda_add";
 			if (Intrinsic.GetByName(lambdaAddName) == null) {

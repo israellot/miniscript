@@ -177,8 +177,7 @@ namespace Miniscript {
 					if (vm == null) return;	// (must have been some error)
 				}
 				startImpResultCount = vm.globalContext.implicitResultCounter;
-				vm.yielding = false;
-				while (!vm.done && !vm.yielding) {
+				while (!vm.done) {
 					cancellationToken.ThrowIfCancellationRequested();
 					ValueTask step = vm.Step(cancellationToken);		// update the machine
 					if (!step.IsCompletedSuccessfully) {
@@ -221,8 +220,7 @@ namespace Miniscript {
 				if (vm == null) return;	// (must have been some error)
 			}
 			startImpResultCount = vm.globalContext.implicitResultCounter;
-			vm.yielding = false;
-			while (!vm.done && !vm.yielding) {
+			while (!vm.done) {
 				cancellationToken.ThrowIfCancellationRequested();
 				vm.StepSyncOnly(cancellationToken);
 			}
@@ -265,12 +263,11 @@ namespace Miniscript {
 			
 			int startImpResultCount = vm.globalContext.implicitResultCounter;
 			vm.storeImplicit = (implicitOutput != null);
-			vm.yielding = false;
 
 			try {
 				if (sourceLine != null) parser.Parse(sourceLine, true);
 				if (!parser.NeedMoreInput()) {
-					while (!vm.done && !vm.yielding) {
+					while (!vm.done) {
 						cancellationToken.ThrowIfCancellationRequested();
 						ValueTask step = vm.Step(cancellationToken);
 						if (!step.IsCompletedSuccessfully) {

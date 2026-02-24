@@ -1838,13 +1838,17 @@ namespace Miniscript {
 			};
 
 			// wait
-			//	Legacy intrinsic retained for compatibility; returns immediately.
-			//	Asynchronous waiting now happens only when an intrinsic returns
-			//	a Task/ValueTask from host code.
-			// See also: time, yield
+			//	Asynchronously delay script execution for the given number of seconds.
+			// See also: time, yield, delay
 			f = Intrinsic.Create("wait");
 			f.AddParam("seconds", 1);
-			f.code = (context) => Intrinsic.Result.Null;
+			f.codeValueTask = (context) => DelayForSeconds(context.GetLocalDouble("seconds"));
+
+			// delay
+			//	Alias for wait(seconds).
+			f = Intrinsic.Create("delay");
+			f.AddParam("seconds", 1);
+			f.codeValueTask = (context) => DelayForSeconds(context.GetLocalDouble("seconds"));
 
 			// yield
 			//	Pause the execution of the script until the next "tick" of
@@ -1853,14 +1857,30 @@ namespace Miniscript {
 			//	if you're doing something in a tight loop, calling yield is
 			//	polite to the host app or other scripts.
 			f = Intrinsic.Create("yield");
-			f.code = (context) => {
-				context.vm.yielding = true;
-				return Intrinsic.Result.Null;
-			};
+			f.codeValueTask = (context) => YieldToNextTaskTurn();
 
 		}
 
 		static Random random;	// TODO: consider storing this on the context, instead of global!
+
+		static async ValueTask<Value> YieldToNextTaskTurn() {
+			await Task.Yield();
+			return null;
+		}
+
+		static ValueTask<Value> DelayForSeconds(double seconds) {
+			if (double.IsNaN(seconds) || seconds <= 0) return new ValueTask<Value>((Value)null);
+			if (double.IsPositiveInfinity(seconds)) return DelayMilliseconds(int.MaxValue);
+			double rawMilliseconds = Math.Ceiling(seconds * 1000.0);
+			if (rawMilliseconds > int.MaxValue) return DelayMilliseconds(int.MaxValue);
+			return DelayMilliseconds((int)rawMilliseconds);
+		}
+
+		static async ValueTask<Value> DelayMilliseconds(int milliseconds) {
+			if (milliseconds <= 0) return null;
+			await Task.Delay(milliseconds).ConfigureAwait(false);
+			return null;
+		}
 
 
 		// Helper method to compile a call to Slice (when invoked directly via slice syntax).

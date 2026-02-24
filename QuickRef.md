@@ -206,4 +206,4 @@ sqrt(x)|str(x)|tan(r)
 |---|---|---|
 print s|time|wait sec
 locals|outer|globals
-yield| |
+yield|delay sec| |
