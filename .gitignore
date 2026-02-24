@@ -49,3 +49,6 @@ Debug
 
 # Tests fallout
 _*.txt
+
+# macOS metadata on external/Windows volumes
+._*
