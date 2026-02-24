@@ -148,7 +148,14 @@ namespace Miniscript {
 					type = param.ParameterType,
 					isContext = isContext
 				};
-				if (!isContext) result.AddParam(paramName);
+				if (!isContext) {
+					if (param.HasDefaultValue && param.DefaultValue != Type.Missing && !(param.DefaultValue is DBNull)) {
+						Value defaultValue = ConvertClrDefaultToMiniValue(param.DefaultValue, param.ParameterType, name, paramName);
+						result.AddParam(paramName, defaultValue);
+					} else {
+						result.AddParam(paramName);
+					}
+				}
 			}
 			LambdaInvoker invoker = BuildLambdaInvoker(lambda);
 			Type returnType = lambda.Method.ReturnType;
@@ -322,6 +329,32 @@ namespace Miniscript {
 
 			throw new TypeException("intrinsic '" + intrinsicName + "' parameter '" + paramName +
 				"' has unsupported type " + targetType.Name);
+		}
+
+		static Value ConvertClrDefaultToMiniValue(object defaultValue, Type paramType, string intrinsicName, string paramName) {
+			if (defaultValue == null) return null;
+			if (defaultValue is Value value) return value;
+
+			Type nullableTarget = Nullable.GetUnderlyingType(paramType);
+			if (nullableTarget != null) paramType = nullableTarget;
+
+			if (paramType.IsEnum) {
+				Type enumUnderlying = Enum.GetUnderlyingType(paramType);
+				object enumNumeric = Convert.ChangeType(defaultValue, enumUnderlying, CultureInfo.InvariantCulture);
+				return TAC.Num(Convert.ToDouble(enumNumeric, CultureInfo.InvariantCulture));
+			}
+
+			if (defaultValue is bool b) return ValBool.Truth(b);
+			if (defaultValue is string s) return s.Length == 0 ? ValString.empty : new ValString(s);
+			if (defaultValue is char c) return new ValString(c.ToString());
+			if (defaultValue is byte || defaultValue is sbyte || defaultValue is short || defaultValue is ushort ||
+				defaultValue is int || defaultValue is uint || defaultValue is long || defaultValue is ulong ||
+				defaultValue is float || defaultValue is double || defaultValue is decimal) {
+				return TAC.Num(Convert.ToDouble(defaultValue, CultureInfo.InvariantCulture));
+			}
+
+			throw new TypeException("intrinsic '" + intrinsicName + "' parameter '" + paramName +
+				"' has unsupported default value type " + defaultValue.GetType().Name);
 		}
 
 		static object ConvertValueToObject(Value value) {

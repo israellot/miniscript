@@ -151,6 +151,40 @@ namespace Miniscript {
 			}
 			await CheckOutput("print " + lambdaUShortName + "(41)", "42").ConfigureAwait(false);
 
+			// Optional/default lambda parameters should map to intrinsic defaults.
+			const string lambdaDefaultAddName = "__unit_lambda_default_add";
+			if (Intrinsic.GetByName(lambdaDefaultAddName) == null) {
+				Intrinsic.CreateFromLambda(lambdaDefaultAddName, (double x, double y = 2.0) => x + y);
+			}
+			await CheckOutput(
+				"print " + lambdaDefaultAddName + "(3)\n" +
+				"print " + lambdaDefaultAddName + "(3,4)",
+				"5",
+				"7"
+			).ConfigureAwait(false);
+
+			const string lambdaDefaultBoolName = "__unit_lambda_default_bool";
+			if (Intrinsic.GetByName(lambdaDefaultBoolName) == null) {
+				Intrinsic.CreateFromLambda(lambdaDefaultBoolName, (bool x = true) => x ? "yes" : "no");
+			}
+			await CheckOutput(
+				"print " + lambdaDefaultBoolName + "()\n" +
+				"print " + lambdaDefaultBoolName + "(false)",
+				"yes",
+				"no"
+			).ConfigureAwait(false);
+
+			const string lambdaDefaultUIntName = "__unit_lambda_default_uint";
+			if (Intrinsic.GetByName(lambdaDefaultUIntName) == null) {
+				Intrinsic.CreateFromLambda(lambdaDefaultUIntName, (uint x = 7U) => (double)(x + 1U));
+			}
+			await CheckOutput(
+				"print " + lambdaDefaultUIntName + "()\n" +
+				"print " + lambdaDefaultUIntName + "(2)",
+				"8",
+				"3"
+			).ConfigureAwait(false);
+
 			// object-typed lambda parameters should still receive unwrapped CLR primitives.
 			const string lambdaObjKindName = "__unit_lambda_obj_kind";
 			if (Intrinsic.GetByName(lambdaObjKindName) == null) {
