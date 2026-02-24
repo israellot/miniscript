@@ -4,16 +4,16 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Miniscript", "Miniscript.csproj", "{C3806B8F-9702-4B39-B6D9-9ECBC298565F}"
 EndProject
 Global
-		GlobalSection(SolutionConfigurationPlatforms) = preSolution
-			Debug|Any CPU = Debug|Any CPU
-			Release|Any CPU = Release|Any CPU
-		EndGlobalSection
-		GlobalSection(ProjectConfigurationPlatforms) = postSolution
-			{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-			{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-			{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-			{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Release|Any CPU.Build.0 = Release|Any CPU
-		EndGlobalSection
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3806B8F-9702-4B39-B6D9-9ECBC298565F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
 	GlobalSection(MonoDevelopProperties) = preSolution
 		Policies = $0
 		$0.DotNetNamingPolicy = $1
