@@ -1,1 +1,0 @@
-../../../minimicro-sysdisk/sys/lib/qa.ms
