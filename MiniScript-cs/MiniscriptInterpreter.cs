@@ -180,7 +180,10 @@ namespace Miniscript {
 				vm.yielding = false;
 				while (!vm.done && !vm.yielding) {
 					cancellationToken.ThrowIfCancellationRequested();
-					await vm.Step(cancellationToken).ConfigureAwait(false);		// update the machine
+					ValueTask step = vm.Step(cancellationToken);		// update the machine
+					if (!step.IsCompletedSuccessfully) {
+						await step.ConfigureAwait(false);
+					}
 				}
 			} catch (MiniscriptException mse) {
 				ReportError(mse);
@@ -197,7 +200,10 @@ namespace Miniscript {
 			try {
 				Compile();
 				cancellationToken.ThrowIfCancellationRequested();
-				await vm.Step(cancellationToken).ConfigureAwait(false);
+				ValueTask step = vm.Step(cancellationToken);
+				if (!step.IsCompletedSuccessfully) {
+					await step.ConfigureAwait(false);
+				}
 			} catch (MiniscriptException mse) {
 				ReportError(mse);
 				Stop(); // was: vm.GetTopContext().JumpToEnd();
@@ -242,16 +248,16 @@ namespace Miniscript {
 		/// <param name="cancellationToken">cancellation token for stopping execution</param>
 		public async Task REPL(string sourceLine, CancellationToken cancellationToken=default) {
 			if (parser == null) parser = new Parser();
-				if (vm == null) {
-					vm = parser.CreateVM(standardOutput);
-					vm.legacyNumericBooleans = legacyNumericBooleans;
-					vm.interpreter = new WeakReference(this);
-				} else if (vm.done && !parser.NeedMoreInput()) {
+			if (vm == null) {
+				vm = parser.CreateVM(standardOutput);
+				vm.legacyNumericBooleans = legacyNumericBooleans;
+				vm.interpreter = new WeakReference(this);
+			} else if (vm.done && !parser.NeedMoreInput()) {
 				// Since the machine and parser are both done, we don't really need the
 				// previously-compiled code.  So let's clear it out, as a memory optimization.
 				vm.GetTopContext().ClearCodeAndTemps();
 				parser.PartialReset();
-            }
+			}
 			if (sourceLine == "#DUMP") {
 				vm.DumpTopContext();
 				return;
@@ -266,7 +272,10 @@ namespace Miniscript {
 				if (!parser.NeedMoreInput()) {
 					while (!vm.done && !vm.yielding) {
 						cancellationToken.ThrowIfCancellationRequested();
-						await vm.Step(cancellationToken).ConfigureAwait(false);
+						ValueTask step = vm.Step(cancellationToken);
+						if (!step.IsCompletedSuccessfully) {
+							await step.ConfigureAwait(false);
+						}
 					}
 					CheckImplicitResult(startImpResultCount);
 				}

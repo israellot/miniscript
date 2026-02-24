@@ -326,7 +326,12 @@ namespace Miniscript {
 			Parse(line);
 		
 			TAC.Machine vm = CreateVM(null);
-			while (!vm.done) await vm.Step().ConfigureAwait(false);
+			while (!vm.done) {
+				ValueTask step = vm.Step();
+				if (!step.IsCompletedSuccessfully) {
+					await step.ConfigureAwait(false);
+				}
+			}
 		}
 
 		void AllowLineBreak(Lexer tokens) {

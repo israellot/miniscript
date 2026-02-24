@@ -542,12 +542,11 @@ namespace Miniscript {
 					} else {
 					// opA is something else... perhaps null
 					switch (op) {
-					case Op.BindAssignA:
-						{
-							if (context.variables == null) context.variables = new ValMap();
-							ValFunction valFunc = (ValFunction)opA;
-                            return valFunc.BindAndCopy(context.variables);
-						}
+						case Op.BindAssignA:
+							{
+								ValFunction valFunc = (ValFunction)opA;
+	                            return valFunc.BindAndCopy(context.GetLocalsMap());
+							}
 						case Op.NotA:
 							return ValBool.Truth(!(opA != null && opA.BoolValue()));
 						case Op.ElemBofA:
@@ -607,6 +606,8 @@ namespace Miniscript {
 			public Value resultStorage;		// where to store the return value (in the calling context)
 			public Machine vm;				// virtual machine
 			public int implicitResultCounter;	// how many times we have stored an implicit result
+			Dictionary<string, Value> localVarCache;
+			bool localVarCacheEnabled = true;
 
 			public bool done {
 				get { return lineNum >= code.Count; }
@@ -647,7 +648,11 @@ namespace Miniscript {
 			public void Reset(bool clearVariables=true) {
 				lineNum = 0;
 				temps = null;
-				if (clearVariables) variables = new ValMap();
+				if (clearVariables) {
+					variables = new ValMap();
+					localVarCache = null;
+					localVarCacheEnabled = true;
+				}
 			}
 
 			public void JumpToEnd() {
@@ -678,7 +683,13 @@ namespace Miniscript {
 					throw new RuntimeException("can't assign to " + identifier);
 				}
 				if (identifier == "self") self = value;
-				if (variables == null) variables = new ValMap();
+				if (localVarCacheEnabled && parent != null) {
+					if (localVarCache == null) localVarCache = new Dictionary<string, Value>(StringComparer.Ordinal);
+					localVarCache[identifier] = value;
+					return;
+				}
+
+				EnsureLocalVariables();
 				if (variables.assignOverride == null || !variables.assignOverride(new ValString(identifier), value)) {
 					variables[identifier] = value;
 				}
@@ -692,7 +703,7 @@ namespace Miniscript {
 			/// </summary>
 			public Value GetLocal(string identifier, Value defaultValue=null) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					return result;
 				}
 				return defaultValue;
@@ -700,7 +711,7 @@ namespace Miniscript {
 			
 			public int GetLocalInt(string identifier, int defaultValue = 0) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					if (result == null) return 0;	// variable found, but its value was null!
 					return result.IntValue();
 				}
@@ -709,7 +720,7 @@ namespace Miniscript {
 
 			public bool GetLocalBool(string identifier, bool defaultValue = false) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					if (result == null) return false;	// variable found, but its value was null!
 					return result.BoolValue();
 				}
@@ -718,7 +729,7 @@ namespace Miniscript {
 
 			public float GetLocalFloat(string identifier, float defaultValue = 0) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					if (result == null) return 0;	// variable found, but its value was null!
 					return result.FloatValue();
 				}
@@ -727,7 +738,7 @@ namespace Miniscript {
 
 			public double GetLocalDouble(string identifier, double defaultValue = 0) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					if (result == null) return 0;	// variable found, but its value was null!
 					return result.DoubleValue();
 				}
@@ -736,7 +747,7 @@ namespace Miniscript {
 
 			public string GetLocalString(string identifier, string defaultValue = null) {
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					if (result == null) return null;	// variable found, but its value was null!
 					return result.ToString();
 				}
@@ -767,27 +778,32 @@ namespace Miniscript {
 					if (identifier == "outer") {
 						// return module variables, if we have them; else globals
 						if (outerVars != null) return outerVars;
-						if (root.variables == null) root.variables = new ValMap();
-						return root.variables;
+						Context globalsContext = root;
+						globalsContext.GetLocalsMap();
+						globalsContext.DisableLocalVarCache();
+						return globalsContext.variables;
 					}
 					break;
-				case 6:
-					if (identifier == "locals") {
-						if (variables == null) variables = new ValMap();
-						return variables;
-					}
-					break;
+					case 6:
+						if (identifier == "locals") {
+							EnsureLocalVariables();
+							DisableLocalVarCache();
+							return variables;
+						}
+						break;
 				case 7:
 					if (identifier == "globals") {
-						if (root.variables == null) root.variables = new ValMap();
-						return root.variables;
+						Context globalsContext = root;
+						globalsContext.GetLocalsMap();
+						globalsContext.DisableLocalVarCache();
+						return globalsContext.variables;
 					}
 					break;
 				}
 				
 				// check for a local variable
 				Value result;
-				if (variables != null && variables.TryGetValue(identifier, out result)) {
+				if (TryGetLocalCached(identifier, out result)) {
 					return result;
 				}
 				if (localOnly != ValVar.LocalOnlyMode.Off) {
@@ -926,6 +942,35 @@ namespace Miniscript {
 			public override string ToString() {
 				return string.Format("Context[{0}/{1}]", lineNum, code.Count);
 			}
+
+			void EnsureLocalVariables() {
+				if (variables != null) return;
+				variables = new ValMap();
+				if (!localVarCacheEnabled || localVarCache == null || localVarCache.Count == 0) return;
+				foreach (var kv in localVarCache) {
+					variables[kv.Key] = kv.Value;
+				}
+			}
+
+			public ValMap GetLocalsMap() {
+				EnsureLocalVariables();
+				return variables;
+			}
+
+			void DisableLocalVarCache() {
+				localVarCacheEnabled = false;
+				localVarCache = null;
+			}
+
+			bool TryGetLocalCached(string identifier, out Value value) {
+				value = null;
+				if (localVarCacheEnabled && parent != null) {
+					if (localVarCache == null) return false;
+					return localVarCache.TryGetValue(identifier, out value);
+				}
+				if (variables == null) return false;
+				return variables.TryGetValue(identifier, out value);
+			}
 		}
 		
 		/// <summary>
@@ -985,32 +1030,36 @@ namespace Miniscript {
 				stack.Peek().Reset(false);
 			}
 
-			public async Task Step(CancellationToken cancellationToken=default) {
+			public ValueTask Step(CancellationToken cancellationToken=default) {
 				cancellationToken.ThrowIfCancellationRequested();
-				if (stack.Count == 0) return;		// not even a global context
+				if (stack.Count == 0) return default;		// not even a global context
 				if (stopwatch == null) {
 					stopwatch = new System.Diagnostics.Stopwatch();
 					stopwatch.Start();
 				}
 				Context context = stack.Peek();
 				while (context.done) {
-					if (stack.Count == 1) return;	// all done (can't pop the global context)
+						if (stack.Count == 1) return default;	// all done (can't pop the global context)
 					PopContext();
 					context = stack.Peek();
 				}
 
 				Line line = context.code[context.lineNum++];
 				try {
-					await DoOneLineAsync(line, context, cancellationToken).ConfigureAwait(false);
+					ValueTask maybeAsyncStep = DoOneLineMaybeAsync(line, context, cancellationToken);
+					if (maybeAsyncStep.IsCompletedSuccessfully) return default;
+					return AwaitStepAsync(maybeAsyncStep, line);
 				} catch (MiniscriptException mse) {
-					if (mse.location == null) mse.location = line.location;
-					if (mse.location == null) {
-						foreach (Context c in stack) {
-							if (c.lineNum >= c.code.Count) continue;
-							mse.location = c.code[c.lineNum].location;
-							if (mse.location != null) break;
-						}
-					}
+					SetExceptionLocation(mse, line);
+					throw;
+				}
+			}
+
+			async ValueTask AwaitStepAsync(ValueTask maybeAsyncStep, Line line) {
+				try {
+					await maybeAsyncStep.ConfigureAwait(false);
+				} catch (MiniscriptException mse) {
+					SetExceptionLocation(mse, line);
 					throw;
 				}
 			}
@@ -1033,14 +1082,7 @@ namespace Miniscript {
 				try {
 					DoOneLineSyncOnly(line, context, cancellationToken);
 				} catch (MiniscriptException mse) {
-					if (mse.location == null) mse.location = line.location;
-					if (mse.location == null) {
-						foreach (Context c in stack) {
-							if (c.lineNum >= c.code.Count) continue;
-							mse.location = c.code[c.lineNum].location;
-							if (mse.location != null) break;
-						}
-					}
+					SetExceptionLocation(mse, line);
 					throw;
 				}
 			}
@@ -1072,16 +1114,28 @@ namespace Miniscript {
 				stack.Push(nextContext);				
 			}
 			
-			async Task DoOneLineAsync(Line line, Context context, CancellationToken cancellationToken) {
+			ValueTask DoOneLineMaybeAsync(Line line, Context context, CancellationToken cancellationToken) {
 //				Console.WriteLine("EXECUTING line " + (context.lineNum-1) + ": " + line);
 				if (line.op == Line.Op.PushParam) {
 					Value val = context.ValueInContext(line.rhsA);
 					context.PushParamArgument(val);
-				} else if (line.op == Line.Op.CallIntrinsicA) {
+					return default;
+				}
+				if (line.op == Line.Op.CallIntrinsicA) {
 					int intrinsicId = line.rhsA.IntValue();
-					Value val = await ExecuteIntrinsicAsync(intrinsicId, context, cancellationToken).ConfigureAwait(false);
-					context.StoreValue(line.lhs, val);
-				} else if (line.op == Line.Op.CallFunctionA) {
+					Intrinsic.Result result = Intrinsic.Execute(intrinsicId, context);
+					if (!result.IsAsync) {
+						context.StoreValue(line.lhs, result.result);
+						return default;
+					}
+					ValueTask<Value> pending = ExecuteIntrinsicAsync(intrinsicId, result.task, cancellationToken);
+					if (pending.IsCompletedSuccessfully) {
+						context.StoreValue(line.lhs, pending.Result);
+						return default;
+					}
+					return AwaitIntrinsicAndStoreResult(pending, context, line.lhs);
+				}
+				if (line.op == Line.Op.CallFunctionA) {
 					// Resolve rhsA.  If it's a function, invoke it; otherwise,
 					// just store it directly (but pop the call context).
 					ValMap valueFoundIn;
@@ -1112,20 +1166,31 @@ namespace Miniscript {
 						if (argCount > 0) throw new TooManyArgumentsException();
 						context.StoreValue(line.lhs, funcVal);
 					}
-				} else if (line.op == Line.Op.ReturnA) {
+					return default;
+				}
+				if (line.op == Line.Op.ReturnA) {
 					Value val = line.Evaluate(context);
 					context.StoreValue(line.lhs, val);
 					PopContext();
-				} else if (line.op == Line.Op.AssignImplicit) {
+					return default;
+				}
+				if (line.op == Line.Op.AssignImplicit) {
 					Value val = line.Evaluate(context);
 					if (storeImplicit) {
 						context.StoreValue(ValVar.implicitResult, val);
 						context.implicitResultCounter++;
 					}
-				} else {
-					Value val = line.Evaluate(context);
-					context.StoreValue(line.lhs, val);
+					return default;
 				}
+
+				Value resultValue = line.Evaluate(context);
+				context.StoreValue(line.lhs, resultValue);
+				return default;
+			}
+
+			static async ValueTask AwaitIntrinsicAndStoreResult(ValueTask<Value> pending, Context context, Value lhs) {
+				Value val = await pending.ConfigureAwait(false);
+				context.StoreValue(lhs, val);
 			}
 
 			void DoOneLineSyncOnly(Line line, Context context, CancellationToken cancellationToken) {
@@ -1184,13 +1249,18 @@ namespace Miniscript {
 				}
 			}
 
-			async Task<Value> ExecuteIntrinsicAsync(int intrinsicId, Context context, CancellationToken cancellationToken) {
-				Intrinsic.Result result = Intrinsic.Execute(intrinsicId, context);
-				if (result == null || !result.IsAsync) return result == null ? null : result.result;
+			ValueTask<Value> ExecuteIntrinsicAsync(int intrinsicId, ValueTask<Value> task, CancellationToken cancellationToken) {
+				if (task.IsCompletedSuccessfully) return new ValueTask<Value>(task.Result);
+				return ExecuteIntrinsicAsyncSlow(intrinsicId, task, cancellationToken);
+			}
 
+			async ValueTask<Value> ExecuteIntrinsicAsyncSlow(int intrinsicId, ValueTask<Value> task, CancellationToken cancellationToken) {
 				string intrinsicName = Intrinsic.GetByID(intrinsicId).name;
 				try {
-					return await result.task.WaitAsync(cancellationToken).ConfigureAwait(false);
+					if (!cancellationToken.CanBeCanceled) {
+						return await task.ConfigureAwait(false);
+					}
+					return await task.AsTask().WaitAsync(cancellationToken).ConfigureAwait(false);
 				} catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
 					throw;
 				} catch (OperationCanceledException oce) {
@@ -1205,7 +1275,7 @@ namespace Miniscript {
 			Value ExecuteIntrinsicSyncOnly(int intrinsicId, Context context, CancellationToken cancellationToken) {
 				cancellationToken.ThrowIfCancellationRequested();
 				Intrinsic.Result result = Intrinsic.Execute(intrinsicId, context);
-				if (result == null || !result.IsAsync) return result == null ? null : result.result;
+				if (!result.IsAsync) return result.result;
 
 				string intrinsicName = Intrinsic.GetByID(intrinsicId).name;
 				if (!result.task.IsCompleted) {
@@ -1220,6 +1290,17 @@ namespace Miniscript {
 					throw;
 				} catch (Exception ex) {
 					throw new RuntimeException("intrinsic '" + intrinsicName + "' task failed: " + ex.Message, ex);
+				}
+			}
+
+			void SetExceptionLocation(MiniscriptException mse, Line line) {
+				if (mse.location == null) mse.location = line.location;
+				if (mse.location == null) {
+					foreach (Context c in stack) {
+						if (c.lineNum >= c.code.Count) continue;
+						mse.location = c.code[c.lineNum].location;
+						if (mse.location != null) break;
+					}
 				}
 			}
 

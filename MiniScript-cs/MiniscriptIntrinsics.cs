@@ -19,6 +19,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading.Tasks;
 
@@ -46,6 +47,14 @@ namespace Miniscript {
 	/// Intrinsic: represents an intrinsic function available to MiniScript code.
 	/// </summary>
 	public class Intrinsic {
+		private struct LambdaParamBinding {
+			public string name;
+			public Type type;
+			public bool isContext;
+		}
+
+		private delegate object LambdaInvoker(object[] args);
+
 		// name of this intrinsic (should be a valid MiniScript identifier)
 		public string name;
 		
@@ -68,6 +77,8 @@ namespace Miniscript {
 
 		public static List<Intrinsic> all = new List<Intrinsic>() { null };
 		static Dictionary<string, Intrinsic> nameMap = new Dictionary<string, Intrinsic>();
+		static readonly Dictionary<Type, Func<ValList, string, string, object>> typedListConverters = new Dictionary<Type, Func<ValList, string, string, object>>();
+		static readonly object typedListConvertersLock = new object();
 				
 		/// <summary>
 		/// Factory method to create a new Intrinsic, filling out its name as given,
@@ -124,14 +135,24 @@ namespace Miniscript {
 			if (lambda == null) throw new ArgumentNullException("lambda");
 			Intrinsic result = Create(name);
 			ParameterInfo[] parameters = lambda.Method.GetParameters();
-			foreach (ParameterInfo param in parameters) {
-				if (param.ParameterType == typeof(TAC.Context)) continue;
-				if (string.IsNullOrEmpty(param.Name)) {
+			LambdaParamBinding[] bindings = new LambdaParamBinding[parameters.Length];
+			for (int i = 0; i < parameters.Length; i++) {
+				ParameterInfo param = parameters[i];
+				bool isContext = param.ParameterType == typeof(TAC.Context);
+				string paramName = param.Name;
+				if (!isContext && string.IsNullOrEmpty(paramName)) {
 					throw new RuntimeException("intrinsic lambda parameter name is missing");
 				}
-				result.AddParam(param.Name);
+				bindings[i] = new LambdaParamBinding {
+					name = paramName,
+					type = param.ParameterType,
+					isContext = isContext
+				};
+				if (!isContext) result.AddParam(paramName);
 			}
-			result.code = (context) => InvokeLambda(lambda, parameters, context, name);
+			LambdaInvoker invoker = BuildLambdaInvoker(lambda);
+			Type returnType = lambda.Method.ReturnType;
+			result.code = (context) => InvokeLambda(invoker, bindings, returnType, context, name);
 			return result;
 		}
 		
@@ -218,28 +239,46 @@ namespace Miniscript {
 			throw new RuntimeException("intrinsic '" + item.name + "' has no implementation");
 		}
 
-		static Result InvokeLambda(Delegate lambda, ParameterInfo[] parameters, TAC.Context context, string intrinsicName) {
-			object[] args = new object[parameters.Length];
+		static LambdaInvoker BuildLambdaInvoker(Delegate lambda) {
+			ParameterInfo[] parameters = lambda.Method.GetParameters();
+			ParameterExpression argsExpr = Expression.Parameter(typeof(object[]), "args");
+			Expression[] invokeArgs = new Expression[parameters.Length];
 			for (int i = 0; i < parameters.Length; i++) {
-				ParameterInfo param = parameters[i];
-				if (param.ParameterType == typeof(TAC.Context)) {
+				invokeArgs[i] = Expression.Convert(
+					Expression.ArrayIndex(argsExpr, Expression.Constant(i)),
+					parameters[i].ParameterType);
+			}
+
+			Expression callExpr = Expression.Invoke(Expression.Constant(lambda), invokeArgs);
+			Expression body = lambda.Method.ReturnType == typeof(void)
+				? Expression.Block(callExpr, Expression.Constant(null, typeof(object)))
+				: Expression.Convert(callExpr, typeof(object));
+
+			return Expression.Lambda<LambdaInvoker>(body, argsExpr).Compile();
+		}
+
+		static Result InvokeLambda(LambdaInvoker invoker, LambdaParamBinding[] bindings, Type returnType, TAC.Context context, string intrinsicName) {
+			object[] args = new object[bindings.Length];
+			for (int i = 0; i < bindings.Length; i++) {
+				LambdaParamBinding binding = bindings[i];
+				if (binding.isContext) {
 					args[i] = context;
 					continue;
 				}
-				Value local = context.GetLocal(param.Name);
-				args[i] = ConvertValueToClr(local, param.ParameterType, intrinsicName, param.Name);
+				Value local = context.GetLocal(binding.name);
+				args[i] = ConvertValueToClr(local, binding.type, intrinsicName, binding.name);
 			}
 
 			object rawResult;
 			try {
-				rawResult = lambda.DynamicInvoke(args);
-			} catch (TargetInvocationException tie) {
-				if (tie.InnerException is MiniscriptException mse) throw mse;
-				if (tie.InnerException != null) throw tie.InnerException;
+				rawResult = invoker(args);
+			} catch (MiniscriptException) {
+				throw;
+			} catch (Exception) {
 				throw;
 			}
 
-			return ConvertLambdaResult(rawResult, lambda.Method.ReturnType, intrinsicName);
+			return ConvertLambdaResult(rawResult, returnType, intrinsicName);
 		}
 
 		static object ConvertValueToClr(Value value, Type targetType, string intrinsicName, string paramName) {
@@ -297,14 +336,28 @@ namespace Miniscript {
 					"' requires a list but got " + value.GetType().Name);
 			}
 
-			Type listType = typeof(List<>).MakeGenericType(elemType);
-			object clrList = Activator.CreateInstance(listType);
-			MethodInfo addMethod = listType.GetMethod("Add");
-			foreach (Value elem in valList.values) {
-				object converted = ConvertValueToClr(elem, elemType, intrinsicName, paramName);
-				addMethod.Invoke(clrList, new object[] { converted });
+			Func<ValList, string, string, object> converter;
+			lock (typedListConvertersLock) {
+				if (!typedListConverters.TryGetValue(elemType, out converter)) {
+					MethodInfo method = typeof(Intrinsic).GetMethod(
+						nameof(ConvertValueToTypedListCached),
+						BindingFlags.NonPublic | BindingFlags.Static);
+					MethodInfo closed = method.MakeGenericMethod(elemType);
+					converter = (Func<ValList, string, string, object>)Delegate.CreateDelegate(
+						typeof(Func<ValList, string, string, object>), closed);
+					typedListConverters[elemType] = converter;
+				}
 			}
-			return clrList;
+			return converter(valList, intrinsicName, paramName);
+		}
+
+		static object ConvertValueToTypedListCached<T>(ValList valList, string intrinsicName, string paramName) {
+			List<T> typed = new List<T>(valList.values.Count);
+			for (int i = 0; i < valList.values.Count; i++) {
+				object converted = ConvertValueToClr(valList.values[i], typeof(T), intrinsicName, paramName);
+				typed.Add((T)converted);
+			}
+			return typed;
 		}
 
 		static Result ConvertLambdaResult(object rawResult, Type returnType, string intrinsicName) {
@@ -352,7 +405,6 @@ namespace Miniscript {
 
 		static async Task<Value> ConvertTaskResultToValue(Task<Result> task) {
 			Result result = await task.ConfigureAwait(false);
-			if (result == null) return null;
 			if (result.IsAsync) return await result.task.ConfigureAwait(false);
 			return result.result;
 		}
@@ -364,26 +416,26 @@ namespace Miniscript {
 
 		static async Task<Value> ConvertValueTaskResultToValue(ValueTask<Result> task) {
 			Result result = await task.ConfigureAwait(false);
-			if (result == null) return null;
 			if (result.IsAsync) return await result.task.ConfigureAwait(false);
 			return result.result;
 		}
 		
 		/// <summary>
 		/// Result represents the result of an intrinsic call.  It can be either
-		/// an immediate value, or an asynchronous Task that will produce a value.
+		/// an immediate value, or an asynchronous operation that will produce a value.
 		/// </summary>
-		public class Result {
-			public Value result;
-			public Task<Value> task;
-
-			public bool IsAsync { get { return task != null; } }
+		public readonly struct Result {
+			public readonly Value result;
+			public readonly ValueTask<Value> task;
+			public readonly bool IsAsync;
 			
 			/// <summary>
 			/// Result constructor taking an immediate value.
 			/// </summary>
 			public Result(Value result) {
 				this.result = result;
+				this.task = default;
+				this.IsAsync = false;
 			}
 
 			/// <summary>
@@ -399,13 +451,20 @@ namespace Miniscript {
 			public Result(string resultStr) {
 				if (string.IsNullOrEmpty(resultStr)) this.result = ValString.empty;
 				else this.result = new ValString(resultStr);
+				this.task = default;
+				this.IsAsync = false;
 			}
 
 			public Result(Task<Value> task) {
-				this.task = task ?? Task.FromResult<Value>(null);
+				this.result = null;
+				this.task = task == null ? new ValueTask<Value>((Value)null) : new ValueTask<Value>(task);
+				this.IsAsync = true;
 			}
 
-			public Result(ValueTask<Value> task) : this(task.AsTask()) {
+			public Result(ValueTask<Value> task) {
+				this.result = null;
+				this.task = task;
+				this.IsAsync = true;
 			}
 			
 			/// <summary>
