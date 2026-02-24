@@ -13,6 +13,8 @@ deal with it directly (see MiniscriptInterpreter instead).
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Miniscript {
 
@@ -313,21 +315,7 @@ namespace Miniscript {
 						if (opB == null || !opB.BoolValue()) context.lineNum = (int)fA;
 						return null;
 					case Op.CallIntrinsicA:
-						// NOTE: intrinsics do not go through NextFunctionContext.  Instead
-						// they execute directly in the current context.  (But usually, the
-						// current context is a wrapper function that was invoked via
-						// Op.CallFunction, so it got a parameter context at that time.)
-						Intrinsic.Result result = Intrinsic.Execute((int)fA, context, context.partialResult);
-						if (result.done) {
-							context.partialResult = null;
-							return result.result;
-						}
-						// OK, this intrinsic function is not yet done with its work.
-						// We need to stay on this same line and call it again with 
-						// the partial result, until it reports that its job is complete.
-						context.partialResult = result;
-						context.lineNum--;
-						return null;
+						throw new RuntimeException("CallIntrinsicA is handled in the VM execution loop");
 						case Op.NotA:
 							if (context.vm.legacyNumericBooleans) return new ValNumber(1.0 - AbsClamp01(fA));
 							return ValBool.Truth(!(opA != null && opA.BoolValue()));
@@ -618,7 +606,6 @@ namespace Miniscript {
 			public Context parent;			// parent (calling) context
 			public Value resultStorage;		// where to store the return value (in the calling context)
 			public Machine vm;				// virtual machine
-			public Intrinsic.Result partialResult;	// work-in-progress of our current intrinsic
 			public int implicitResultCounter;	// how many times we have stored an implicit result
 
 			public bool done {
@@ -998,7 +985,8 @@ namespace Miniscript {
 				stack.Peek().Reset(false);
 			}
 
-			public void Step() {
+			public async Task Step(CancellationToken cancellationToken=default) {
+				cancellationToken.ThrowIfCancellationRequested();
 				if (stack.Count == 0) return;		// not even a global context
 				if (stopwatch == null) {
 					stopwatch = new System.Diagnostics.Stopwatch();
@@ -1013,7 +1001,37 @@ namespace Miniscript {
 
 				Line line = context.code[context.lineNum++];
 				try {
-					DoOneLine(line, context);
+					await DoOneLineAsync(line, context, cancellationToken).ConfigureAwait(false);
+				} catch (MiniscriptException mse) {
+					if (mse.location == null) mse.location = line.location;
+					if (mse.location == null) {
+						foreach (Context c in stack) {
+							if (c.lineNum >= c.code.Count) continue;
+							mse.location = c.code[c.lineNum].location;
+							if (mse.location != null) break;
+						}
+					}
+					throw;
+				}
+			}
+
+			public void StepSyncOnly(CancellationToken cancellationToken=default) {
+				cancellationToken.ThrowIfCancellationRequested();
+				if (stack.Count == 0) return;		// not even a global context
+				if (stopwatch == null) {
+					stopwatch = new System.Diagnostics.Stopwatch();
+					stopwatch.Start();
+				}
+				Context context = stack.Peek();
+				while (context.done) {
+					if (stack.Count == 1) return;	// all done (can't pop the global context)
+					PopContext();
+					context = stack.Peek();
+				}
+
+				Line line = context.code[context.lineNum++];
+				try {
+					DoOneLineSyncOnly(line, context, cancellationToken);
 				} catch (MiniscriptException mse) {
 					if (mse.location == null) mse.location = line.location;
 					if (mse.location == null) {
@@ -1054,11 +1072,15 @@ namespace Miniscript {
 				stack.Push(nextContext);				
 			}
 			
-			void DoOneLine(Line line, Context context) {
+			async Task DoOneLineAsync(Line line, Context context, CancellationToken cancellationToken) {
 //				Console.WriteLine("EXECUTING line " + (context.lineNum-1) + ": " + line);
 				if (line.op == Line.Op.PushParam) {
 					Value val = context.ValueInContext(line.rhsA);
 					context.PushParamArgument(val);
+				} else if (line.op == Line.Op.CallIntrinsicA) {
+					int intrinsicId = line.rhsA.IntValue();
+					Value val = await ExecuteIntrinsicAsync(intrinsicId, context, cancellationToken).ConfigureAwait(false);
+					context.StoreValue(line.lhs, val);
 				} else if (line.op == Line.Op.CallFunctionA) {
 					// Resolve rhsA.  If it's a function, invoke it; otherwise,
 					// just store it directly (but pop the call context).
@@ -1103,6 +1125,101 @@ namespace Miniscript {
 				} else {
 					Value val = line.Evaluate(context);
 					context.StoreValue(line.lhs, val);
+				}
+			}
+
+			void DoOneLineSyncOnly(Line line, Context context, CancellationToken cancellationToken) {
+//				Console.WriteLine("EXECUTING line " + (context.lineNum-1) + ": " + line);
+				if (line.op == Line.Op.PushParam) {
+					Value val = context.ValueInContext(line.rhsA);
+					context.PushParamArgument(val);
+				} else if (line.op == Line.Op.CallIntrinsicA) {
+					int intrinsicId = line.rhsA.IntValue();
+					Value val = ExecuteIntrinsicSyncOnly(intrinsicId, context, cancellationToken);
+					context.StoreValue(line.lhs, val);
+				} else if (line.op == Line.Op.CallFunctionA) {
+					// Resolve rhsA.  If it's a function, invoke it; otherwise,
+					// just store it directly (but pop the call context).
+					ValMap valueFoundIn;
+					Value funcVal = line.rhsA.Val(context, out valueFoundIn);	// resolves the whole dot chain, if any
+					if (funcVal is ValFunction) {
+						Value self = null;
+						// bind "super" to the parent of the map the function was found in
+						Value super = valueFoundIn == null ? null : valueFoundIn.Lookup(ValString.magicIsA);
+						if (line.rhsA is ValSeqElem) {
+							// bind "self" to the object used to invoke the call, except
+							// when invoking via "super"
+							Value seq = ((ValSeqElem)(line.rhsA)).sequence;
+							if (seq is ValVar && ((ValVar)seq).identifier == "super") self = context.self;
+							else self = context.ValueInContext(seq);
+						}
+						ValFunction func = (ValFunction)funcVal;
+						int argCount = line.rhsB.IntValue();
+						Context nextContext = context.NextCallContext(func.function, argCount, self != null, line.lhs);
+						nextContext.outerVars = func.outerVars;
+						if (valueFoundIn != null) nextContext.SetVar("super", super);
+						if (self != null) nextContext.self = self;	// (set only if bound above)
+						stack.Push(nextContext);
+					} else {
+						// The user is attempting to call something that's not a function.
+						// We'll allow that, but any number of parameters is too many.  [#35]
+						// (No need to pop them, as the exception will pop the whole call stack anyway.)
+						int argCount = line.rhsB.IntValue();
+						if (argCount > 0) throw new TooManyArgumentsException();
+						context.StoreValue(line.lhs, funcVal);
+					}
+				} else if (line.op == Line.Op.ReturnA) {
+					Value val = line.Evaluate(context);
+					context.StoreValue(line.lhs, val);
+					PopContext();
+				} else if (line.op == Line.Op.AssignImplicit) {
+					Value val = line.Evaluate(context);
+					if (storeImplicit) {
+						context.StoreValue(ValVar.implicitResult, val);
+						context.implicitResultCounter++;
+					}
+				} else {
+					Value val = line.Evaluate(context);
+					context.StoreValue(line.lhs, val);
+				}
+			}
+
+			async Task<Value> ExecuteIntrinsicAsync(int intrinsicId, Context context, CancellationToken cancellationToken) {
+				Intrinsic.Result result = Intrinsic.Execute(intrinsicId, context);
+				if (result == null || !result.IsAsync) return result == null ? null : result.result;
+
+				string intrinsicName = Intrinsic.GetByID(intrinsicId).name;
+				try {
+					return await result.task.WaitAsync(cancellationToken).ConfigureAwait(false);
+				} catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+					throw;
+				} catch (OperationCanceledException oce) {
+					throw new RuntimeException("intrinsic '" + intrinsicName + "' task was canceled", oce);
+				} catch (MiniscriptException) {
+					throw;
+				} catch (Exception ex) {
+					throw new RuntimeException("intrinsic '" + intrinsicName + "' task failed: " + ex.Message, ex);
+				}
+			}
+
+			Value ExecuteIntrinsicSyncOnly(int intrinsicId, Context context, CancellationToken cancellationToken) {
+				cancellationToken.ThrowIfCancellationRequested();
+				Intrinsic.Result result = Intrinsic.Execute(intrinsicId, context);
+				if (result == null || !result.IsAsync) return result == null ? null : result.result;
+
+				string intrinsicName = Intrinsic.GetByID(intrinsicId).name;
+				if (!result.task.IsCompleted) {
+					throw new RuntimeException("intrinsic '" + intrinsicName + "' returned an incomplete task in sync-only mode");
+				}
+
+				try {
+					return result.task.GetAwaiter().GetResult();
+				} catch (OperationCanceledException oce) {
+					throw new RuntimeException("intrinsic '" + intrinsicName + "' task was canceled", oce);
+				} catch (MiniscriptException) {
+					throw;
+				} catch (Exception ex) {
+					throw new RuntimeException("intrinsic '" + intrinsicName + "' task failed: " + ex.Message, ex);
 				}
 			}
 
@@ -1154,11 +1271,11 @@ namespace Miniscript {
 				if (line.op == Line.Op.BindAssignA) {
 					ValFunction func = (ValFunction)line.rhsA;
 					Dump(func.function.code, -1, indent+1);
+					}
 				}
 			}
-		}
 
-		public static ValTemp LTemp(int tempNum) {
+			public static ValTemp LTemp(int tempNum) {
 			return new ValTemp(tempNum);
 		}
 		public static ValVar LVar(string identifier) {
@@ -1180,4 +1297,3 @@ namespace Miniscript {
 		
 	}
 }
-

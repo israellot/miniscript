@@ -19,15 +19,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Threading.Tasks;
 
 namespace Miniscript {
 	/// <summary>
 	/// IntrinsicCode is a delegate to the actual C# code invoked by an intrinsic method.
 	/// </summary>
 	/// <param name="context">TAC.Context in which the intrinsic was invoked</param>
-	/// <param name="partialResult">partial result from a previous invocation, if any</param>
-	/// <returns>result of the computation: whether it's complete, a partial result if not, and a Value if so</returns>
-	public delegate Intrinsic.Result IntrinsicCode(TAC.Context context, Intrinsic.Result partialResult);
+	/// <returns>result of the computation, either immediate or asynchronous</returns>
+	public delegate Intrinsic.Result IntrinsicCode(TAC.Context context);
+	public delegate Task<Value> IntrinsicCodeTask(TAC.Context context);
+	public delegate ValueTask<Value> IntrinsicCodeValueTask(TAC.Context context);
 	
 	/// <summary>
 	/// Information about the app hosting MiniScript.  Set this in your main program.
@@ -48,6 +50,8 @@ namespace Miniscript {
 		
 		// actual C# code invoked by the intrinsic
 		public IntrinsicCode code;
+		public IntrinsicCodeTask codeTask;
+		public IntrinsicCodeValueTask codeValueTask;
 		
 		// a numeric ID (used internally -- don't worry about this)
 		public int id { get { return numericID; } }
@@ -155,32 +159,30 @@ namespace Miniscript {
 		}
 		
 		/// <summary>
-		/// Internally-used function to execute an intrinsic (by ID) given a
-		/// context and a partial result.
+		/// Internally-used function to execute an intrinsic (by ID) given a context.
 		/// </summary>
-		public static Result Execute(int id, TAC.Context context, Result partialResult) {
+		public static Result Execute(int id, TAC.Context context) {
 			Intrinsic item = GetByID(id);
-			return item.code(context, partialResult);
+			if (item.code != null) return item.code(context);
+			if (item.codeValueTask != null) return new Result(item.codeValueTask(context));
+			if (item.codeTask != null) return new Result(item.codeTask(context));
+			throw new RuntimeException("intrinsic '" + item.name + "' has no implementation");
 		}
 		
 		/// <summary>
-		/// Result represents the result of an intrinsic call.  An intrinsic will either
-		/// be done with its work, or not yet done (e.g. because it's waiting for something).
-		/// If it's done, set done=true, and store the result Value in result.
-		/// If it's not done, set done=false, and store any partial result in result (and 
-		/// then your intrinsic will get invoked with this Result passed in as partialResult).
+		/// Result represents the result of an intrinsic call.  It can be either
+		/// an immediate value, or an asynchronous Task that will produce a value.
 		/// </summary>
 		public class Result {
-			public bool done;		// true if our work is complete; false if we need to Continue
-			public Value result;	// final result if done; in-progress data if not done
+			public Value result;
+			public Task<Value> task;
+
+			public bool IsAsync { get { return task != null; } }
 			
 			/// <summary>
-			/// Result constructor taking a Value, and an optional done flag.
+			/// Result constructor taking an immediate value.
 			/// </summary>
-			/// <param name="result">result or partial result of the call</param>
-			/// <param name="done">whether our work is done (optional, defaults to true)</param>
-			public Result(Value result, bool done=true) {
-				this.done = done;
+			public Result(Value result) {
 				this.result = result;
 			}
 
@@ -188,7 +190,6 @@ namespace Miniscript {
 			/// Result constructor for a simple numeric result.
 			/// </summary>
 			public Result(double resultNum) {
-				this.done = true;
 				this.result = new ValNumber(resultNum);
 			}
 
@@ -196,16 +197,22 @@ namespace Miniscript {
 			/// Result constructor for a simple string result.
 			/// </summary>
 			public Result(string resultStr) {
-				this.done = true;
 				if (string.IsNullOrEmpty(resultStr)) this.result = ValString.empty;
 				else this.result = new ValString(resultStr);
+			}
+
+			public Result(Task<Value> task) {
+				this.task = task ?? Task.FromResult<Value>(null);
+			}
+
+			public Result(ValueTask<Value> task) : this(task.AsTask()) {
 			}
 			
 			/// <summary>
 			/// Result.Null: static Result representing null (no value).
 			/// </summary>
 			public static Result Null { get { return _null; } }
-			static Result _null = new Result(null, true);
+			static Result _null = new Result((Value)null);
 			
 			/// <summary>
 			/// Result.EmptyString: static Result representing "" (empty string).
@@ -217,20 +224,13 @@ namespace Miniscript {
 			/// Result.True: static Result representing true (1.0).
 			/// </summary>
 			public static Result True { get { return _true; } }
-			static Result _true = new Result(ValBool.True, true);
+			static Result _true = new Result(ValBool.True);
 
 			/// <summary>
 			/// Result.True: static Result representing false (0.0).
 			/// </summary>
 			public static Result False { get { return _false; } }
-			static Result _false = new Result(ValBool.False, true);
-			
-			/// <summary>
-			/// Result.Waiting: static Result representing a need to wait,
-			/// with no in-progress value.
-			/// </summary>
-			public static Result Waiting { get { return _waiting; } }
-			static Result _waiting = new Result(null, false);
+			static Result _false = new Result(ValBool.False);
 		}
 	}
 	
@@ -284,7 +284,7 @@ namespace Miniscript {
 			// Example: abs(-42)		returns 42
 			f = Intrinsic.Create("abs");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Abs(context.GetLocalDouble("x")));
 			};
 
@@ -296,7 +296,7 @@ namespace Miniscript {
 			// Example: acos(0) 		returns 1.570796
 			f = Intrinsic.Create("acos");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Acos(context.GetLocalDouble("x")));
 			};
 
@@ -308,7 +308,7 @@ namespace Miniscript {
 			// Example: asin(1) return 1.570796
 			f = Intrinsic.Create("asin");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Asin(context.GetLocalDouble("x")));
 			};
 
@@ -327,7 +327,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("atan");
 			f.AddParam("y", 0);
 			f.AddParam("x", 1);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				double y = context.GetLocalDouble("y");
 				double x = context.GetLocalDouble("x");
 				if (x == 1.0) return new Intrinsic.Result(Math.Atan(y));
@@ -350,7 +350,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("bitAnd");
 			f.AddParam("i", 0);
 			f.AddParam("j", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				var i = doubleToUnsignedSplit(context.GetLocalDouble("i"));
 				var j = doubleToUnsignedSplit(context.GetLocalDouble("j"));
 				var sign = i.Item1 & j.Item1;
@@ -370,7 +370,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("bitOr");
 			f.AddParam("i", 0);
 			f.AddParam("j", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				var i = doubleToUnsignedSplit(context.GetLocalDouble("i"));
 				var j = doubleToUnsignedSplit(context.GetLocalDouble("j"));
 				var sign = i.Item1 | j.Item1;
@@ -390,7 +390,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("bitXor");
 			f.AddParam("i", 0);
 			f.AddParam("j", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
                 var i = doubleToUnsignedSplit(context.GetLocalDouble("i"));
                 var j = doubleToUnsignedSplit(context.GetLocalDouble("j"));
                 var sign = i.Item1 ^ j.Item1;
@@ -406,7 +406,7 @@ namespace Miniscript {
 			// See also: code
 			f = Intrinsic.Create("char");
 			f.AddParam("codePoint", 65);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				int codepoint = context.GetLocalInt("codePoint");
 				string s = char.ConvertFromUtf32(codepoint);
 				return new Intrinsic.Result(s);
@@ -421,7 +421,7 @@ namespace Miniscript {
 			// See also: floor
 			f = Intrinsic.Create("ceil");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Ceiling(context.GetLocalDouble("x")));
 			};
 			
@@ -435,7 +435,7 @@ namespace Miniscript {
 			// Example: code("*")		returns 42
 			f = Intrinsic.Create("code");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				int codepoint = 0;
 				if (self != null) codepoint = char.ConvertToUtf32(self.ToString(), 0);
@@ -449,7 +449,7 @@ namespace Miniscript {
 			// Example: cos(0)		returns 1
 			f = Intrinsic.Create("cos");
 			f.AddParam("radians", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Cos(context.GetLocalDouble("radians")));
 			};
 
@@ -462,7 +462,7 @@ namespace Miniscript {
 			// See also: floor
 			f = Intrinsic.Create("floor");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Floor(context.GetLocalDouble("x")));
 			};
 
@@ -475,7 +475,7 @@ namespace Miniscript {
 			// Example: @floor isa funcRef		returns 1
 			// See also: number, string, list, map
 			f = Intrinsic.Create("funcRef");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.functionType == null) {
 					context.vm.functionType = FunctionType().EvalCopy(context.vm.globalContext);
 				}
@@ -492,7 +492,7 @@ namespace Miniscript {
 			// Returns: integer hash of the given value
 			f = Intrinsic.Create("hash");
 			f.AddParam("obj");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.GetLocal("obj");
 				return new Intrinsic.Result(val.Hash());
 			};
@@ -513,7 +513,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("hasIndex");
 			f.AddParam("self");
 			f.AddParam("index");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				Value index = context.GetLocal("index");
 				if (self is ValList) {
@@ -546,7 +546,7 @@ namespace Miniscript {
 			// See also: hasIndex
 			f = Intrinsic.Create("indexes");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (self is ValMap) {
 					ValMap map = (ValMap)self;
@@ -584,7 +584,7 @@ namespace Miniscript {
 			f.AddParam("self");
 			f.AddParam("value");
 			f.AddParam("after");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				Value value = context.GetLocal("value");
 				Value after = context.GetLocal("after");
@@ -643,7 +643,7 @@ namespace Miniscript {
 			f.AddParam("self");
 			f.AddParam("index");
 			f.AddParam("value");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				Value index = context.GetLocal("index");
 				Value value = context.GetLocal("value");
@@ -670,7 +670,7 @@ namespace Miniscript {
 			// intrinsics
 			//	Returns a read-only map of all named intrinsics.
 			f = Intrinsic.Create("intrinsics");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (intrinsicsMap != null) return new Intrinsic.Result(intrinsicsMap);
 					intrinsicsMap = new ValMap();
 					intrinsicsMap.assignOverride = (k,v) => {
@@ -695,7 +695,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("join");
 			f.AddParam("self");
 			f.AddParam("delimiter", " ");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.self;
 				string delim = context.GetLocalString("delimiter");
 				if (!(val is ValList)) return new Intrinsic.Result(val);
@@ -718,7 +718,7 @@ namespace Miniscript {
 			// Example: "hello".len		returns 5
 			f = Intrinsic.Create("len");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.self;
 				if (val is ValList) {
 					List<Value> list = ((ValList)val).values;
@@ -740,7 +740,7 @@ namespace Miniscript {
 			// Example: [1, 2, 3] isa list		returns 1
 			// See also: number, string, map, funcRef
 				f = Intrinsic.Create("list");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.listType == null) {
 					context.vm.listType = ListType().EvalCopy(context.vm.globalContext);
 				}
@@ -754,7 +754,7 @@ namespace Miniscript {
 				// Example: true isa bool		returns true
 				// See also: number, string, list, map, funcRef
 				f = Intrinsic.Create("bool");
-				f.code = (context, partialResult) => {
+				f.code = (context) => {
 					if (context.vm.boolType == null) {
 						context.vm.boolType = BoolType().EvalCopy(context.vm.globalContext);
 					}
@@ -771,7 +771,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("log");
 			f.AddParam("x", 0);
 			f.AddParam("base", 10);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				double x = context.GetLocalDouble("x");
 				double b = context.GetLocalDouble("base");
 				double result;
@@ -789,7 +789,7 @@ namespace Miniscript {
 			// See also: upper
 			f = Intrinsic.Create("lower");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.self;
 				if (val is ValString) {
 					string str = ((ValString)val).value;
@@ -806,7 +806,7 @@ namespace Miniscript {
 			// Example: {1:"one"} isa map		returns 1
 			// See also: number, string, list, funcRef
 			f = Intrinsic.Create("map");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.mapType == null) {
 					context.vm.mapType = MapType().EvalCopy(context.vm.globalContext);
 				}
@@ -823,7 +823,7 @@ namespace Miniscript {
 			// Example: 42 isa number		returns 1
 			// See also: string, list, map, funcRef
 			f = Intrinsic.Create("number");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.numberType == null) {
 					context.vm.numberType = NumberType().EvalCopy(context.vm.globalContext);
 				}
@@ -835,7 +835,7 @@ namespace Miniscript {
 			//	a circle's circumference to its diameter.
 			// Example: pi		returns 3.141593
 			f = Intrinsic.Create("pi");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.PI);
 			};
 
@@ -851,7 +851,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("print");
 			f.AddParam("s", ValString.empty);
 			f.AddParam("delimiter");
-				f.code = (context, partialResult) => {
+				f.code = (context) => {
 					Value sVal = context.GetLocal("s");
 					string s = (sVal == null ? "null" : sVal.ToString(context.vm));
 					Value delimiter = context.GetLocal("delimiter");
@@ -871,7 +871,7 @@ namespace Miniscript {
 			// See also: pull; push; remove
 			f = Intrinsic.Create("pop");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (self is ValList) {
 					List<Value> list = ((ValList)self).values;
@@ -900,7 +900,7 @@ namespace Miniscript {
 			// See also: pop; push; remove
 			f = Intrinsic.Create("pull");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (self is ValList) {
 					List<Value> list = ((ValList)self).values;
@@ -928,7 +928,7 @@ namespace Miniscript {
 				f = Intrinsic.Create("push");
 			f.AddParam("self");
 			f.AddParam("value");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				Value value = context.GetLocal("value");
 				if (self is ValList) {
@@ -954,7 +954,7 @@ namespace Miniscript {
 			f.AddParam("from", 0);
 			f.AddParam("to", 0);
 			f.AddParam("step");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value p0 = context.GetLocal("from");
 				Value p1 = context.GetLocal("to");
 				Value p2 = context.GetLocal("step");
@@ -986,7 +986,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("refEquals");
 			f.AddParam("a");
 			f.AddParam("b");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value a = context.GetLocal("a");
 				Value b = context.GetLocal("b");
 				bool result = false;
@@ -1027,7 +1027,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("remove");
 			f.AddParam("self");
 			f.AddParam("k");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				Value k = context.GetLocal("k");
 				if (self is ValMap) {
@@ -1076,7 +1076,7 @@ namespace Miniscript {
 			f.AddParam("oldval");
 			f.AddParam("newval");
 			f.AddParam("maxCount");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (self == null) throw new RuntimeException("argument to 'replace' must not be null");
 				Value oldval = context.GetLocal("oldval");
@@ -1147,7 +1147,7 @@ namespace Miniscript {
 			f = Intrinsic.Create("round");
 			f.AddParam("x", 0);
 			f.AddParam("decimalPlaces", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				double num = context.GetLocalDouble("x");
 				int decimalPlaces = context.GetLocalInt("decimalPlaces");
 				if (decimalPlaces >= 0) {
@@ -1171,7 +1171,7 @@ namespace Miniscript {
 			// Returns: pseudorandom number in the range [0,1)
 			f = Intrinsic.Create("rnd");
 			f.AddParam("seed");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (random == null) random = new Random();
 				Value seed = context.GetLocal("seed");
 				if (seed != null) random = new Random(seed.IntValue());
@@ -1185,7 +1185,7 @@ namespace Miniscript {
 			// Example: sign(-42.6)		returns -1
 			f = Intrinsic.Create("sign");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Sign(context.GetLocalDouble("x")));
 			};
 
@@ -1196,7 +1196,7 @@ namespace Miniscript {
 			// Example: sin(pi/2)		returns 1
 			f = Intrinsic.Create("sin");
 			f.AddParam("radians", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Sin(context.GetLocalDouble("radians")));
 			};
 				
@@ -1215,7 +1215,7 @@ namespace Miniscript {
 			f.AddParam("seq");
 			f.AddParam("from", 0);
 			f.AddParam("to");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value seq = context.GetLocal("seq");
 				int fromIdx = context.GetLocalInt("from");
 				Value toVal = context.GetLocal("to");
@@ -1264,7 +1264,7 @@ namespace Miniscript {
 				f.AddParam("self");
 				f.AddParam("byKey");
 				f.AddParam("ascending", ValBool.True);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				ValList list = self as ValList;
 				if (list == null || list.values.Count < 2) return new Intrinsic.Result(self);
@@ -1323,7 +1323,7 @@ namespace Miniscript {
 			f.AddParam("self");
 			f.AddParam("delimiter", " ");
 			f.AddParam("maxCount", -1);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				string self = context.self.ToString();
 				string delim = context.GetLocalString("delimiter");
 				int maxCount = context.GetLocalInt("maxCount");
@@ -1349,13 +1349,13 @@ namespace Miniscript {
 			// Example: sqrt(1764)		returns 42
 			f = Intrinsic.Create("sqrt");
 			f.AddParam("x", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Sqrt(context.GetLocalDouble("x")));
 			};
 
 			// stackTrace: get a list describing the call stack.
 			f = Intrinsic.Create("stackTrace");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				TAC.Machine vm = context.vm;
 				var _stackAtBreak = new ValString("_stackAtBreak");
 				if (vm.globalContext.variables.ContainsKey(_stackAtBreak)) {
@@ -1377,7 +1377,7 @@ namespace Miniscript {
 			// See also: val
 			f = Intrinsic.Create("str");
 			f.AddParam("x", ValString.empty);
-			f.code = (context, partialResult) => {		
+			f.code = (context) => {		
 				var x = context.GetLocal("x");
 				if (x == null) return new Intrinsic.Result(ValString.empty);
 				return new Intrinsic.Result(x.ToString());
@@ -1391,7 +1391,7 @@ namespace Miniscript {
 			// Example: "Hello" isa string		returns 1
 			// See also: number, list, map, funcRef
 			f = Intrinsic.Create("string");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.stringType == null) {
 					context.vm.stringType = StringType().EvalCopy(context.vm.globalContext);
 				}
@@ -1405,7 +1405,7 @@ namespace Miniscript {
 			// Returns: null
 			f = Intrinsic.Create("shuffle");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (random == null) random = new Random();
 				if (self is ValList) {
@@ -1442,7 +1442,7 @@ namespace Miniscript {
 			// Example: range(3).sum		returns 6 (3 + 2 + 1 + 0)
 			f = Intrinsic.Create("sum");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.self;
 				double sum = 0;
 				if (val is ValList) {
@@ -1466,14 +1466,14 @@ namespace Miniscript {
 			// Example: tan(pi/4)		returns 1
 			f = Intrinsic.Create("tan");
 			f.AddParam("radians", 0);
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(Math.Tan(context.GetLocalDouble("radians")));
 			};
 
 			// time
 			//	Returns the number of seconds since the script started running.
 			f = Intrinsic.Create("time");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				return new Intrinsic.Result(context.vm.runTime);
 			};
 			
@@ -1486,7 +1486,7 @@ namespace Miniscript {
 			// See also: lower
 			f = Intrinsic.Create("upper");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value val = context.self;
 				if (val is ValString) {
 					string str = ((ValString)val).value;
@@ -1505,7 +1505,7 @@ namespace Miniscript {
 			// See also: str
 				f = Intrinsic.Create("val");
 				f.AddParam("self", 0);
-				f.code = (context, partialResult) => {
+				f.code = (context) => {
 					Value val = context.self;
 					if (val is ValNumber) return new Intrinsic.Result(val);
 					if (val is ValBool) return new Intrinsic.Result(val.IntValue());
@@ -1527,7 +1527,7 @@ namespace Miniscript {
 			// See also: indexes
 			f = Intrinsic.Create("values");
 			f.AddParam("self");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				Value self = context.self;
 				if (self is ValMap) {
 					ValMap map = (ValMap)self;
@@ -1554,7 +1554,7 @@ namespace Miniscript {
 			//		hostName: name of the host application, e.g. "Mini Micro"
 			//		hostInfo: URL or other short info about the host app
 			f = Intrinsic.Create("version");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				if (context.vm.versionMap == null) {
 					//UnityEngine.Debug.Log("in version intrinsic, and versionMap == null");
 					var d = new ValMap();
@@ -1579,24 +1579,13 @@ namespace Miniscript {
 			};
 
 			// wait
-			//	Pause execution of this script for some amount of time.
-			// seconds (default 1.0): how many seconds to wait
-			// Example: wait 2.5		pauses the script for 2.5 seconds
+			//	Legacy intrinsic retained for compatibility; returns immediately.
+			//	Asynchronous waiting now happens only when an intrinsic returns
+			//	a Task/ValueTask from host code.
 			// See also: time, yield
 			f = Intrinsic.Create("wait");
 			f.AddParam("seconds", 1);
-			f.code = (context, partialResult) => {
-				double now = context.vm.runTime;
-				if (partialResult == null) {
-					// Just starting our wait; calculate end time and return as partial result
-					double interval = context.GetLocalDouble("seconds");
-					return new Intrinsic.Result(new ValNumber(now + interval), false);
-				} else {
-					// Continue until current time exceeds the time in the partial result
-					if (now > partialResult.result.DoubleValue()) return Intrinsic.Result.Null;
-					return partialResult;
-				}
-			};
+			f.code = (context) => Intrinsic.Result.Null;
 
 			// yield
 			//	Pause the execution of the script until the next "tick" of
@@ -1605,7 +1594,7 @@ namespace Miniscript {
 			//	if you're doing something in a tight loop, calling yield is
 			//	polite to the host app or other scripts.
 			f = Intrinsic.Create("yield");
-			f.code = (context, partialResult) => {
+			f.code = (context) => {
 				context.vm.yielding = true;
 				return Intrinsic.Result.Null;
 			};

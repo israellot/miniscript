@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Threading.Tasks;
 
 namespace Miniscript {
 	public class Parser {
@@ -321,11 +322,11 @@ namespace Miniscript {
 			return result;
 		}
 
-		public void REPL(string line) {
+		public async Task REPL(string line) {
 			Parse(line);
 		
 			TAC.Machine vm = CreateVM(null);
-			while (!vm.done) vm.Step();
+			while (!vm.done) await vm.Step().ConfigureAwait(false);
 		}
 
 		void AllowLineBreak(Lexer tokens) {
@@ -1317,4 +1318,3 @@ namespace Miniscript {
 		}
 	}
 }
-

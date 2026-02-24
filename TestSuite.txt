@@ -397,7 +397,7 @@ print @intrinsics.sin
 1
 42
 40.2
-wait OK
+wait broken
 5
 4
 2

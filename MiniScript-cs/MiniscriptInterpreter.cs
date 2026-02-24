@@ -4,13 +4,15 @@ The only class in this file is Interpreter, which is your main interface
 to the MiniScript system.  You give Interpreter some MiniScript source 
 code, and tell it where to send its output (via delegate functions called
 TextOutputMethod).  Then you typically call RunUntilDone, which returns 
-when either the script has stopped or the given timeout has passed.  
+when either the script has stopped or cancellation is requested.  
 
 For details, see Chapters 1-3 of the MiniScript Integration Guide.
 */
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Miniscript {
 
@@ -159,22 +161,15 @@ namespace Miniscript {
 		}
 		
 		/// <summary>
-		/// Run the compiled code until we either reach the end, or we reach the
-		/// specified time limit.  In the latter case, you can then call RunUntilDone
-		/// again to continue execution right from where it left off.
-		/// 
-		/// Or, if returnEarly is true, we will also return if we reach an intrinsic
-		/// method that returns a partial result, indicating that it needs to wait
-		/// for something.  Again, call RunUntilDone again later to continue.
+		/// Run the compiled code until we either reach the end, or cancellation is requested.
 		/// 
 		/// Note that this method first compiles the source code if it wasn't compiled
 		/// already, and in that case, may generate compiler errors.  And of course
 		/// it may generate runtime errors while running.  In either case, these are
 		/// reported via errorOutput.
 		/// </summary>
-		/// <param name="timeLimit">maximum amout of time to run before returning, in seconds</param>
-		/// <param name="returnEarly">if true, return as soon as we reach an intrinsic that returns a partial result</param>
-		public void RunUntilDone(double timeLimit=60, bool returnEarly=true) {
+		/// <param name="cancellationToken">cancellation token for stopping execution</param>
+		public async Task RunUntilDone(CancellationToken cancellationToken=default) {
 			int startImpResultCount = 0;
 			try {
 				if (vm == null) {
@@ -182,15 +177,10 @@ namespace Miniscript {
 					if (vm == null) return;	// (must have been some error)
 				}
 				startImpResultCount = vm.globalContext.implicitResultCounter;
-				double startTime = vm.runTime;
 				vm.yielding = false;
 				while (!vm.done && !vm.yielding) {
-                    // ToDo: find a substitute for vm.runTime, or make it go faster, because
-                    // right now about 14% of our run time is spent just in the vm.runtime call!
-                    // Perhaps Environment.TickCount?  (Just watch out for the wraparound every 25 days!)
-					if (vm.runTime - startTime > timeLimit) return;	// time's up for now!
-					vm.Step();		// update the machine
-					if (returnEarly && vm.GetTopContext().partialResult != null) return;	// waiting for something
+					cancellationToken.ThrowIfCancellationRequested();
+					await vm.Step(cancellationToken).ConfigureAwait(false);		// update the machine
 				}
 			} catch (MiniscriptException mse) {
 				ReportError(mse);
@@ -203,10 +193,11 @@ namespace Miniscript {
 		/// Run one step of the virtual machine.  This method is not very useful
 		/// except in special cases; usually you will use RunUntilDone (above) instead.
 		/// </summary>
-		public void Step() {
+		public async Task Step(CancellationToken cancellationToken=default) {
 			try {
 				Compile();
-				vm.Step();
+				cancellationToken.ThrowIfCancellationRequested();
+				await vm.Step(cancellationToken).ConfigureAwait(false);
 			} catch (MiniscriptException mse) {
 				ReportError(mse);
 				Stop(); // was: vm.GetTopContext().JumpToEnd();
@@ -214,13 +205,42 @@ namespace Miniscript {
 		}
 
 		/// <summary>
+		/// Run the compiled code without allowing asynchronous waits.  If any intrinsic
+		/// returns an incomplete Task/ValueTask, this method throws.
+		/// </summary>
+		public void RunUntilDoneSyncOnly(CancellationToken cancellationToken=default) {
+			int startImpResultCount = 0;
+			if (vm == null) {
+				Compile();
+				if (vm == null) return;	// (must have been some error)
+			}
+			startImpResultCount = vm.globalContext.implicitResultCounter;
+			vm.yielding = false;
+			while (!vm.done && !vm.yielding) {
+				cancellationToken.ThrowIfCancellationRequested();
+				vm.StepSyncOnly(cancellationToken);
+			}
+			CheckImplicitResult(startImpResultCount);
+		}
+
+		/// <summary>
+		/// Run one VM step without allowing asynchronous waits.  If the current op
+		/// needs to await, this method throws.
+		/// </summary>
+		public void StepSyncOnly(CancellationToken cancellationToken=default) {
+			Compile();
+			cancellationToken.ThrowIfCancellationRequested();
+			vm.StepSyncOnly(cancellationToken);
+		}
+
+		/// <summary>
 		/// Read Eval Print Loop.  Run the given source until it either terminates,
-		/// or hits the given time limit.  When it terminates, if we have new
+		/// or cancellation is requested.  When it terminates, if we have new
 		/// implicit output, print that to the implicitOutput stream.
 		/// </summary>
 		/// <param name="sourceLine">Source line.</param>
-		/// <param name="timeLimit">Time limit.</param>
-		public void REPL(string sourceLine, double timeLimit=60) {
+		/// <param name="cancellationToken">cancellation token for stopping execution</param>
+		public async Task REPL(string sourceLine, CancellationToken cancellationToken=default) {
 			if (parser == null) parser = new Parser();
 				if (vm == null) {
 					vm = parser.CreateVM(standardOutput);
@@ -237,7 +257,6 @@ namespace Miniscript {
 				return;
 			}
 			
-			double startTime = vm.runTime;
 			int startImpResultCount = vm.globalContext.implicitResultCounter;
 			vm.storeImplicit = (implicitOutput != null);
 			vm.yielding = false;
@@ -246,8 +265,8 @@ namespace Miniscript {
 				if (sourceLine != null) parser.Parse(sourceLine, true);
 				if (!parser.NeedMoreInput()) {
 					while (!vm.done && !vm.yielding) {
-						if (vm.runTime - startTime > timeLimit) return;	// time's up for now!
-						vm.Step();
+						cancellationToken.ThrowIfCancellationRequested();
+						await vm.Step(cancellationToken).ConfigureAwait(false);
 					}
 					CheckImplicitResult(startImpResultCount);
 				}

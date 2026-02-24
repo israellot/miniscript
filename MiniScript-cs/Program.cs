@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using Miniscript;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 class MainClass {
 	static bool legacyNumericBooleans = true;
@@ -23,7 +24,7 @@ class MainClass {
 
 	}
 
-	static void Test(List<string> sourceLines, int sourceLineNum,
+	static async Task Test(List<string> sourceLines, int sourceLineNum,
 					 List<string> expectedOutput, int outputLineNum) {
 		if (expectedOutput == null) expectedOutput = new List<string>();
 //		Console.WriteLine("TEST (LINE {0}):", sourceLineNum);
@@ -37,7 +38,7 @@ class MainClass {
 		miniscript.standardOutput = (string s, bool eol) => actualOutput.Add(s);
 		miniscript.errorOutput = miniscript.standardOutput;
 		miniscript.implicitOutput = miniscript.standardOutput;
-		miniscript.RunUntilDone(60, false);
+		await miniscript.RunUntilDone().ConfigureAwait(false);
 
 //		Console.WriteLine("ACTUAL OUTPUT:");
 //		Console.WriteLine(string.Join("\n", actualOutput));
@@ -63,7 +64,7 @@ class MainClass {
 
 	}
 
-	static void RunTestSuite(string path) {
+	static async Task RunTestSuite(string path) {
 		StreamReader file = new StreamReader(path);
 		if (file == null) {
 			Print("Unable to read: " + path);
@@ -79,7 +80,7 @@ class MainClass {
 		int lineNum = 1;
 		while (line != null) {
 			if (line.StartsWith("====")) {
-				if (sourceLines != null) Test(sourceLines, testLineNum, expectedOutput, outputLineNum);
+				if (sourceLines != null) await Test(sourceLines, testLineNum, expectedOutput, outputLineNum).ConfigureAwait(false);
 				sourceLines = null;
 				expectedOutput = null;
 			} else if (line.StartsWith("----")) {
@@ -98,23 +99,23 @@ class MainClass {
 			line = file.ReadLine();
 			lineNum++;
 		}
-		if (sourceLines != null) Test(sourceLines, testLineNum, expectedOutput, outputLineNum);
+		if (sourceLines != null) await Test(sourceLines, testLineNum, expectedOutput, outputLineNum).ConfigureAwait(false);
 		Print("\nIntegration tests complete.\n");
 	}
 
-	static void RunStrictBoolSmokeTests() {
+	static async Task RunStrictBoolSmokeTests() {
 		Print("Running strict-bool smoke tests.\n");
 		bool oldMode = legacyNumericBooleans;
 		legacyNumericBooleans = false;
-		Test(new List<string> { "print true and false", "print not false", "print true == true" }, 1,
-			new List<string> { "false", "true", "true" }, 1);
-		Test(new List<string> { "print 0.5 and 0.5", "print 0.5 or 0.5" }, 1,
-			new List<string> { "true", "true" }, 1);
+		await Test(new List<string> { "print true and false", "print not false", "print true == true" }, 1,
+			new List<string> { "false", "true", "true" }, 1).ConfigureAwait(false);
+		await Test(new List<string> { "print 0.5 and 0.5", "print 0.5 or 0.5" }, 1,
+			new List<string> { "true", "true" }, 1).ConfigureAwait(false);
 		legacyNumericBooleans = oldMode;
 		Print("Strict-bool smoke tests complete.\n");
 	}
 
-	static void RunFile(string path, bool dumpTAC=false) {
+	static async Task RunFile(string path, bool dumpTAC=false) {
 		StreamReader file = new StreamReader(path);
 		if (file == null) {
 			Print("Unable to read: " + path);
@@ -122,7 +123,8 @@ class MainClass {
 		}
 
 		List<string> sourceLines = new List<string>();
-		while (!file.EndOfStream) sourceLines.Add(file.ReadLine());
+		string sourceLine;
+		while ((sourceLine = file.ReadLine()) != null) sourceLines.Add(sourceLine);
 
 		Interpreter miniscript = new Interpreter(sourceLines);
 		miniscript.legacyNumericBooleans = legacyNumericBooleans;
@@ -135,12 +137,12 @@ class MainClass {
 		}
 		
 		while (!miniscript.done) {
-			miniscript.RunUntilDone();
+			await miniscript.RunUntilDone().ConfigureAwait(false);
 		}
 
 	}
 
-	public static void Main(string[] args) {
+	public static async Task Main(string[] args) {
 		var positionalArgs = new List<string>();
 		foreach (var arg in args) {
 			if (arg == "--strict-bool") legacyNumericBooleans = false;
@@ -154,19 +156,19 @@ class MainClass {
 			if (positionalArgs.Count > 1 && positionalArgs[1] == "--integration") {
 				var file = positionalArgs.Count < 3 || string.IsNullOrEmpty(positionalArgs[2]) ? "../../../TestSuite.txt" : positionalArgs[2];
 				Print("Running test suite.\n");
-				RunTestSuite(file);
+				await RunTestSuite(file).ConfigureAwait(false);
 				return;
 			}
 
 			Print("Miniscript test harness.\n");
 
 			Print("Running unit tests.\n");
-			UnitTest.Run();
+			await UnitTest.Run().ConfigureAwait(false);
 			if (UnitTest.HasFailures) {
 				Print("Unit tests reported failures.\n");
 				Environment.ExitCode = 1;
 			}
-			RunStrictBoolSmokeTests();
+			await RunStrictBoolSmokeTests().ConfigureAwait(false);
 
 			Print("\n");
 
@@ -176,7 +178,7 @@ class MainClass {
 				Print("Running quick test.\n");
 				var stopwatch = new System.Diagnostics.Stopwatch();
 				stopwatch.Start();
-				RunFile(quickTestFilePath, true);
+				await RunFile(quickTestFilePath, true).ConfigureAwait(false);
 				stopwatch.Stop();
 				Print($"Run time: {stopwatch.Elapsed.TotalSeconds} sec");
 			} else {
@@ -186,7 +188,7 @@ class MainClass {
 		}
 
 		if (positionalArgs.Count > 0) {
-			RunFile(positionalArgs[0]);
+			await RunFile(positionalArgs[0]).ConfigureAwait(false);
 			return;
 		}
 		
@@ -198,7 +200,7 @@ class MainClass {
 			Console.Write(repl.NeedMoreInput() ? ">>> " : "> ");
 			string inp = Console.ReadLine();
 			if (inp == null) break;
-			repl.REPL(inp);
+			await repl.REPL(inp).ConfigureAwait(false);
 		}
 	}
 }
