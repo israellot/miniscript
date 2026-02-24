@@ -5,8 +5,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 
 class MainClass {
-	static bool legacyNumericBooleans = true;
-
 	static void Print(string s, bool lineBreak=true) {
 		if (lineBreak) Console.WriteLine(s);
 		else Console.Write(s);
@@ -33,7 +31,6 @@ class MainClass {
 //		Console.WriteLine(string.Join("\n", expectedOutput));
 
 		Interpreter miniscript = new Interpreter(sourceLines);
-		miniscript.legacyNumericBooleans = legacyNumericBooleans;
 		List<string> actualOutput = new List<string>();
 		miniscript.standardOutput = (string s, bool eol) => actualOutput.Add(s);
 		miniscript.errorOutput = miniscript.standardOutput;
@@ -103,16 +100,13 @@ class MainClass {
 		Print("\nIntegration tests complete.\n");
 	}
 
-	static async Task RunStrictBoolSmokeTests() {
-		Print("Running strict-bool smoke tests.\n");
-		bool oldMode = legacyNumericBooleans;
-		legacyNumericBooleans = false;
+	static async Task RunBoolSmokeTests() {
+		Print("Running bool smoke tests.\n");
 		await Test(new List<string> { "print true and false", "print not false", "print true == true" }, 1,
 			new List<string> { "false", "true", "true" }, 1).ConfigureAwait(false);
 		await Test(new List<string> { "print 0.5 and 0.5", "print 0.5 or 0.5" }, 1,
 			new List<string> { "true", "true" }, 1).ConfigureAwait(false);
-		legacyNumericBooleans = oldMode;
-		Print("Strict-bool smoke tests complete.\n");
+		Print("Bool smoke tests complete.\n");
 	}
 
 	static async Task RunFile(string path, bool dumpTAC=false) {
@@ -127,7 +121,6 @@ class MainClass {
 		while ((sourceLine = file.ReadLine()) != null) sourceLines.Add(sourceLine);
 
 		Interpreter miniscript = new Interpreter(sourceLines);
-		miniscript.legacyNumericBooleans = legacyNumericBooleans;
 		miniscript.standardOutput = (string s, bool eol) => Print(s, eol);
 		miniscript.implicitOutput = miniscript.standardOutput;
 		miniscript.Compile();
@@ -145,9 +138,13 @@ class MainClass {
 	public static async Task Main(string[] args) {
 		var positionalArgs = new List<string>();
 		foreach (var arg in args) {
-			if (arg == "--strict-bool") legacyNumericBooleans = false;
-			else if (arg == "--legacy-bool") legacyNumericBooleans = true;
-			else positionalArgs.Add(arg);
+			if (arg == "--strict-bool") continue;
+			if (arg == "--legacy-bool") {
+				Print("Error: --legacy-bool is no longer supported.");
+				Environment.ExitCode = 1;
+				return;
+			}
+			positionalArgs.Add(arg);
 		}
 
 		if (positionalArgs.Count > 0 && positionalArgs[0] == "--test") {
@@ -168,7 +165,7 @@ class MainClass {
 				Print("Unit tests reported failures.\n");
 				Environment.ExitCode = 1;
 			}
-			await RunStrictBoolSmokeTests().ConfigureAwait(false);
+			await RunBoolSmokeTests().ConfigureAwait(false);
 
 			Print("\n");
 
@@ -193,7 +190,6 @@ class MainClass {
 		}
 		
 		Interpreter repl = new Interpreter();
-		repl.legacyNumericBooleans = legacyNumericBooleans;
 		repl.implicitOutput = repl.standardOutput;
 
 		while (true) {

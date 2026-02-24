@@ -375,7 +375,6 @@ namespace Miniscript {
 			}
 
 			public override string ToString(TAC.Machine vm) {
-				if (vm != null && vm.legacyNumericBooleans) return value ? "1" : "0";
 				return value ? "true" : "false";
 			}
 
@@ -1331,4 +1330,3 @@ namespace Miniscript {
 	}
 	
 }
-

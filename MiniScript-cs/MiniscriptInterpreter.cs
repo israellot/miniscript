@@ -64,13 +64,6 @@ namespace Miniscript {
 			/// </summary>
 			public object hostData;
 
-			/// <summary>
-			/// Whether to preserve the legacy behavior where logical operators on
-			/// numbers can produce non-boolean numeric truth values (e.g. 0.5).
-			/// Default is true for backward compatibility.
-			/// </summary>
-			public bool legacyNumericBooleans = true;
-		
 		/// <summary>
 		/// done: returns true when we don't have a virtual machine, or we do have
 		/// one and it is done (has reached the end of its code).
@@ -142,7 +135,6 @@ namespace Miniscript {
 				try {
 					parser.Parse(source);
 					vm = parser.CreateVM(standardOutput);
-					vm.legacyNumericBooleans = legacyNumericBooleans;
 					vm.interpreter = new WeakReference(this);
 				} catch (MiniscriptException mse) {
 				ReportError(mse);
@@ -248,7 +240,6 @@ namespace Miniscript {
 			if (parser == null) parser = new Parser();
 			if (vm == null) {
 				vm = parser.CreateVM(standardOutput);
-				vm.legacyNumericBooleans = legacyNumericBooleans;
 				vm.interpreter = new WeakReference(this);
 			} else if (vm.done && !parser.NeedMoreInput()) {
 				// Since the machine and parser are both done, we don't really need the

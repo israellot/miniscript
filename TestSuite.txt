@@ -38,20 +38,20 @@ print 0.5 or 1
 print 1 and null
 print 1 or null
 ----------------------------------------------------------------------
-1
-0
-0
-0
-0.5
-0.3
-1
-1
-1
-0.5
-0.72
-1
-0
-1
+true
+false
+false
+false
+true
+true
+true
+true
+true
+true
+true
+true
+false
+true
 ======================================================================
 ==== Logical operators (beyond the standard 0-1 range).
 print -1 and 0
@@ -61,12 +61,12 @@ print 0 or -1
 print 5 and 10
 print 5 or 10
 ----------------------------------------------------------------------
-0
-0
-1
-1
-1
-1
+false
+false
+true
+true
+true
+true
 ======================================================================
 ==== Parsing of numbers in various formats (including exponential).
 print 123
@@ -99,16 +99,16 @@ reset; print((ffalse(1) or ftrue(2) or ffalse(3)) + "; " + r);
 reset; print((ftrue(1) or ffalse(2) or ffalse(3)) + "; " + r);
 reset; print((fmaybe(1) or ffalse(2) or ffalse(3)) + "; " + r);
 ----------------------------------------------------------------------
-1; [1, 2, 3]
-0; [1, 2, 3]
-0; [1, 2]
-0; [1]
-0.5; [1, 2, 3]
-0; [1, 2, 3]
-1; [1, 2, 3]
-1; [1, 2]
-1; [1]
-0.5; [1, 2, 3]
+true; [1, 2, 3]
+false; [1, 2, 3]
+false; [1, 2]
+false; [1]
+true; [1, 2, 3]
+false; [1, 2, 3]
+true; [1, 2, 3]
+true; [1, 2]
+true; [1]
+true; [1, 2]
 ======================================================================
 ==== Watch out for bug #6 (failure of assignment with boolean operators).
 a = 1234; a = (1 or 0); print a
@@ -116,17 +116,17 @@ a = 1234; a = (0 or 1); print a
 a = 1234; a = (1 and 0); print a
 a = 1234; a = (0 and 1); print a
 ----------------------------------------------------------------------
-1
-1
-0
-0
+true
+true
+false
+false
 ======================================================================
 ==== Check the new 'true' and 'false' keywords introduced in v1.1.
 print true
 print false
 ----------------------------------------------------------------------
-1
-0
+true
+false
 ======================================================================
 ==== Testing conventional 'if', and what values count as true.
 if 1 then
@@ -251,7 +251,7 @@ y = x == 42
 print y
 ----------------------------------------------------------------------
 42
-1
+true
 ======================================================================
 ==== List operations.
 list1 = [0, 10, 20, 30, 40]
@@ -285,9 +285,9 @@ print "Equality B: " + (listB == list2)
 [0, 10]
 []
 [0, 10, 22, 30, 40]
-Equality 1: 0
-Equality A: 1
-Equality B: 1
+Equality 1: false
+Equality A: true
+Equality B: true
 ======================================================================
 ==== String operations.
 str1 = "apple"
@@ -312,7 +312,7 @@ app
 banapple
 anan
 plan
-1
+true
 banana
 ba
 ======================================================================
@@ -322,10 +322,10 @@ print "Q" >= "A" and "Q" <= "Z"
 print "foo" == "FOO"
 print "foo" == "foo"
 ----------------------------------------------------------------------
-0
-1
-0
-1
+false
+true
+false
+true
 ======================================================================
 ==== Basic map functionality.
 sortedStr = function(d)
@@ -356,9 +356,9 @@ print d
 {1: 1, 2: 4, 3: 9}
 {1: -1, 2: 4}
 44
-Equality B: 1
-Equality C: 1
-Equality C2: 0
+Equality B: true
+Equality C: true
+Equality C2: false
 {"empty": null}
 ======================================================================
 ==== Test map equality in the trickier case of recursive references.
@@ -372,9 +372,9 @@ print "a == b: " + (a == b)
 print "a == c: " + (a == c)
 print "b == c: " + (b == c)
 ----------------------------------------------------------------------
-a == b: 0
-a == c: 1
-b == c: 0
+a == b: false
+a == c: true
+b == c: false
 ======================================================================
 ==== Simple intrinsic functions.
 ==== (Including a range check on rnd, which is about the best we can do.)
@@ -393,11 +393,11 @@ print @intrinsics.sin
 ----------------------------------------------------------------------
 42
 [10, 20]
-1
-1
+true
+true
 42
 40.2
-wait broken
+wait OK
 5
 4
 2
@@ -466,20 +466,20 @@ l = [a,b]
 l.sort
 print(l)					// ["bar", "foo"]
 ----------------------------------------------------------------------
-1
-0
-1
-0
+true
+false
+true
+false
 2
 null
-1
-0
-1
-0
+true
+false
+true
+false
 2
 null
-1
-0
+true
+false
 2
 foo
 null
@@ -555,14 +555,14 @@ E
 H
 J
 L
-not []: 1
-not {}: 1
-not 0: 1
-not "": 1
-not [42]: 0
-not {3:9}: 0
-not 42: 0
-not "a": 0
+not []: true
+not {}: true
+not 0: true
+not "": true
+not [42]: false
+not {3:9}: false
+not 42: false
+not "a": false
 ok
 ======================================================================
 ==== hashing and dictionary key uniqueness
@@ -579,9 +579,9 @@ d2 = {1:"one"}
 d2[2] = "two"
 print hash(d1) == hash(d2)
 ----------------------------------------------------------------------
-1
+true
 1: 2, 2
-1
+true
 ======================================================================
 ==== Equality checking in the edge case of a list or dictionary
 ==== that contains itself.  This actually works now; our equality
@@ -604,13 +604,13 @@ print(d1 == d2)	// prints 1, because they are equivalent
 d2[1] = "bar"	// but they're now truly different
 print(d1 == d2)	// so this prints 0
 ----------------------------------------------------------------------
-1
-1
-1
-0
-1
-1
-0
+true
+true
+true
+false
+true
+true
+false
 ======================================================================
 ==== Mixed-type equality testing.  Should return null for any ordering
 ==== comparisons, but 0/1 for equal/not-equal tests.
@@ -623,10 +623,10 @@ print "abc" > [42]
 print [42] <= {1:2}
 print {"ichi":1} >= 0
 ----------------------------------------------------------------------
-0
-0
-1
-1
+false
+false
+true
+true
 null
 null
 null
@@ -744,11 +744,11 @@ end for
 ----------------------------------------------------------------------
 {null: 42}
 42
-1
+true
 {42: null}
 null
-1
-1
+true
+true
 ======================================================================
 ==== Function invocation via dot vs. lookup by name
 d = {}
@@ -886,8 +886,8 @@ print d
 Ho Bob!
 Hello!
 [1, 2, 3, 5]
-0
-1
+false
+true
 {"foo": "bar"}
 ======================================================================
 ==== Test the insert() intrinsic.
@@ -993,9 +993,9 @@ a2 = f
 print a1==a2 	// should be false (0)
 print @f==@rnd	// should be true (1)
 ----------------------------------------------------------------------
-1
-0
-1
+true
+false
+true
 ======================================================================
 ==== Advanced function references.
 module = {}
@@ -1010,8 +1010,8 @@ docs[@module.func1] = "Multiplies by 42."
 print docs[@module.func1]
 print docs[@f]
 ----------------------------------------------------------------------
-1
-1
+true
+true
 Multiplies by 42.
 Multiplies by 42.
 ======================================================================
@@ -1269,7 +1269,7 @@ results.sort
 print results
 print d
 ----------------------------------------------------------------------
-{1: 1, 2: 1, 3: 1}
+{1: true, 2: true, 3: true}
 [1, 2, 3]
 {}
 ======================================================================
@@ -1381,12 +1381,12 @@ print round(12345, -3)
 ----------------------------------------------------------------------
 A
 func invoked!
-1
+true
 B
-1
+true
 C
-0
-1
+false
+true
 FUNCTION(seed)
 12000
 ======================================================================
@@ -1432,16 +1432,16 @@ e = new d
 print e isa d
 print d isa d
 ----------------------------------------------------------------------
-0
-0
-1
-1
-0
-1
-0
-1
-1
-0
+false
+false
+true
+true
+false
+true
+false
+true
+true
+false
 ======================================================================
 ==== Test math-assignment operators.
 score = 0
@@ -1514,10 +1514,10 @@ print true and
 ----------------------------------------------------------------------
 [1, 2, 3, 4]
 Hello world!
-1
+true
 [1, 2]
 1 and 2
-1
+true
 ======================================================================
 ==== Test map entry lookups, both inherited and direct.
 A = {"one":1, "two":2}
@@ -1544,14 +1544,14 @@ print [42]*NaN == null
 print [42]*Inf == null
 print [42]*Inf == null
 ----------------------------------------------------------------------
-1
-1
-1
-1
-1
-1
-1
-1
+true
+true
+true
+true
+true
+true
+true
+true
 ======================================================================
 ==== Test binding of function context (i.e. outer scope)
 globA = "Global A"
@@ -1631,12 +1631,12 @@ print refEquals(a,b)
 print refEquals(a,c)
 print refEquals(b,c)
 ----------------------------------------------------------------------
-0
-1
-0
-0
-1
-0
+false
+true
+false
+false
+true
+false
 ======================================================================
 ==== Test the split intrinsic
 print split("Eat, pray, love", ", ")
@@ -1878,10 +1878,10 @@ print p("LEFT", true) and p("RIGHT", false)
 ----------------------------------------------------------------------
 LEFT
 RIGHT
-1
+true
 LEFT
 RIGHT
-0
+false
 ======================================================================
 ==== Order of operations: isa
 p = function(first, second)
@@ -1892,7 +1892,7 @@ print p("LEFT", {}) isa p("RIGHT", {})
 ----------------------------------------------------------------------
 LEFT
 RIGHT
-0
+false
 ======================================================================
 ==== Order of operations: comparisons
 p = function(first, second)
@@ -1915,22 +1915,22 @@ print   p("A", 1) ==
 ----------------------------------------------------------------------
 LEFT
 RIGHT
-1
+true
 LEFT
 RIGHT
-0
+false
 LEFT
 RIGHT
-0
+false
 LEFT
 RIGHT
-0
+false
 LEFT
 RIGHT
-1
+true
 LEFT
 RIGHT
-1
+true
 A
 B
 C
@@ -1938,7 +1938,7 @@ D
 E
 F
 G
-0
+null
 ======================================================================
 ==== Order of operations: add and subtract
 p = function(first, second)
@@ -2089,11 +2089,11 @@ print not true
 print true and false
 print true or false
 ----------------------------------------------------------------------
-1
-0
-0
-0
-1
+true
+false
+false
+false
+true
 ======================================================================
 ==== Boolean comparisons
 print true == true
@@ -2101,7 +2101,7 @@ print true != false
 print false < true
 print false >= true
 ----------------------------------------------------------------------
-1
-1
-1
-0
+true
+true
+true
+false

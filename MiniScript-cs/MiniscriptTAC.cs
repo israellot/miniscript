@@ -227,18 +227,6 @@ namespace Miniscript {
 					Value opA = rhsA!=null ? rhsA.Val(context) : null;
 					Value opB = rhsB!=null ? rhsB.Val(context) : null;
 
-					// In compatibility mode, treat bool as 1/0 for arithmetic and comparison
-					// operators so older scripts continue to behave the same way.
-					if (context.vm.legacyNumericBooleans) {
-						bool numericOp = (op == Op.APlusB || op == Op.AMinusB || op == Op.ATimesB || op == Op.ADividedByB
-							|| op == Op.AModB || op == Op.APowB || op == Op.AEqualB || op == Op.ANotEqualB
-							|| op == Op.AGreaterThanB || op == Op.AGreatOrEqualB || op == Op.ALessThanB || op == Op.ALessOrEqualB);
-						if (numericOp) {
-							if (opA is ValBool) opA = ValNumber.Truth(((ValBool)opA).value);
-							if (opB is ValBool) opB = ValNumber.Truth(((ValBool)opB).value);
-						}
-					}
-
 					if (op == Op.AisaB) {
 						if (opA == null) return ValBool.Truth(opB == null);
 						return ValBool.Truth(opA.IsA(opB, context.vm));
@@ -316,10 +304,9 @@ namespace Miniscript {
 						return null;
 					case Op.CallIntrinsicA:
 						throw new RuntimeException("CallIntrinsicA is handled in the VM execution loop");
-						case Op.NotA:
-							if (context.vm.legacyNumericBooleans) return new ValNumber(1.0 - AbsClamp01(fA));
-							return ValBool.Truth(!(opA != null && opA.BoolValue()));
-						}
+					case Op.NotA:
+						return ValBool.Truth(!(opA != null && opA.BoolValue()));
+					}
 						if (opB is ValNumber || opB == null) {
 							double fB = opB != null ? ((ValNumber)opB).value : 0;
 							switch (op) {
@@ -348,16 +335,8 @@ namespace Miniscript {
 							case Op.ALessOrEqualB:
 								return ValBool.Truth(fA <= fB);
 							case Op.AAndB:
-								if (context.vm.legacyNumericBooleans) {
-									if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
-									return new ValNumber(AbsClamp01(fA * fB));
-								}
 								return ValBool.Truth((opA != null && opA.BoolValue()) && (opB != null && opB.BoolValue()));
 							case Op.AOrB:
-								if (context.vm.legacyNumericBooleans) {
-									if (!(opB is ValNumber)) fB = opB != null && opB.BoolValue() ? 1 : 0;
-									return new ValNumber(AbsClamp01(fA + fB - fA * fB));
-								}
 								return ValBool.Truth((opA != null && opA.BoolValue()) || (opB != null && opB.BoolValue()));
 							default:
 								break;
@@ -560,32 +539,11 @@ namespace Miniscript {
 				
 
 					if (op == Op.AAndB || op == Op.AOrB) {
-						// We already handled the case where opA was a number above;
-						// this code handles the case where opA is something else.
-						double fA = opA != null && opA.BoolValue() ? 1 : 0;
-						double fB;
-						if (opB is ValNumber) fB = ((ValNumber)opB).value;
-						else fB = opB != null && opB.BoolValue() ? 1 : 0;
-						if (context.vm.legacyNumericBooleans && opB is ValNumber) {
-							double result;
-							if (op == Op.AAndB) {
-								result = AbsClamp01(fA * fB);
-							} else {
-								result = AbsClamp01(fA + fB - fA * fB);
-							}
-							return new ValNumber(result);
-						}
 						if (op == Op.AAndB) return ValBool.Truth((opA != null && opA.BoolValue()) && (opB != null && opB.BoolValue()));
 						return ValBool.Truth((opA != null && opA.BoolValue()) || (opB != null && opB.BoolValue()));
 					}
 					return null;
 				}
-
-			static double AbsClamp01(double d) {
-				if (d < 0) d = -d;
-				if (d > 1) return 1;
-				return d;
-			}
 
 		}
 		
@@ -989,7 +947,6 @@ namespace Miniscript {
 				public ValMap boolType;
 				public ValMap stringType;
 				public ValMap versionMap;
-				public bool legacyNumericBooleans = true;
 			
 			public Context globalContext {			// contains global variables
 				get { return _globalContext; }

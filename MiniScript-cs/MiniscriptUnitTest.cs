@@ -59,9 +59,8 @@ namespace Miniscript {
 			ReportError(string.Format(desc, actual, expected));
 		}
 
-		static async Task<(Interpreter miniscript, List<string> output)> RunScript(string source, bool legacyNumericBooleans) {
+		static async Task<(Interpreter miniscript, List<string> output)> RunScript(string source) {
 			var miniscript = new Interpreter(source);
-			miniscript.legacyNumericBooleans = legacyNumericBooleans;
 			var capturedOutput = new List<string>();
 			miniscript.standardOutput = (s, eol) => capturedOutput.Add(s);
 			miniscript.implicitOutput = miniscript.standardOutput;
@@ -71,8 +70,8 @@ namespace Miniscript {
 			return (miniscript, capturedOutput);
 		}
 
-		static async Task CheckOutput(string source, bool legacyNumericBooleans, params string[] expected) {
-			var run = await RunScript(source, legacyNumericBooleans).ConfigureAwait(false);
+		static async Task CheckOutput(string source, params string[] expected) {
+			var run = await RunScript(source).ConfigureAwait(false);
 			List<string> output = run.output;
 			ErrorIf(output.Count != expected.Length,
 				string.Format("Expected {0} output lines, got {1}", expected.Length, output.Count));
@@ -93,20 +92,17 @@ namespace Miniscript {
 		}
 
 		static async Task RunRuntimeUnitTests() {
-			// Legacy mode preserves numeric-style output for booleans.
-			await CheckOutput("print true\nprint false\nprint true == false", true, "1", "0", "0").ConfigureAwait(false);
-			await CheckOutput("print true\nprint false\nprint true == false", false, "true", "false", "false").ConfigureAwait(false);
+			// Booleans should print as true/false.
+			await CheckOutput("print true\nprint false\nprint true == false", "true", "false", "false").ConfigureAwait(false);
 
-			// Verify logical behavior in legacy (fuzzy) vs strict mode.
-			await CheckOutput("print 0.5 and 0.5\nprint 0.5 or 0.5\nprint not 0.5", true, "0.25", "0.75", "0.5").ConfigureAwait(false);
-			await CheckOutput("print 0.5 and 0.5\nprint 0.5 or 0.5\nprint not 0.5", false, "true", "true", "false").ConfigureAwait(false);
+			// Verify logical behavior.
+			await CheckOutput("print 0.5 and 0.5\nprint 0.5 or 0.5\nprint not 0.5", "true", "true", "false").ConfigureAwait(false);
 
 			// Bool type map is available and works with isa.
-			await CheckOutput("print true isa bool\nprint false isa bool\nprint 1 isa bool", true, "1", "1", "0").ConfigureAwait(false);
-			await CheckOutput("print true isa bool\nprint false isa bool\nprint 1 isa bool", false, "true", "true", "false").ConfigureAwait(false);
+			await CheckOutput("print true isa bool\nprint false isa bool\nprint 1 isa bool", "true", "true", "false").ConfigureAwait(false);
 
-			// Strict mode should produce bool-typed results for logical/comparison operators.
-			var strictRun = await RunScript("a = true and false\nb = 2 > 1\nc = not 0\nd = true or false\ne = true == true", false).ConfigureAwait(false);
+			// Logical/comparison operators should produce bool-typed results.
+			var strictRun = await RunScript("a = true and false\nb = 2 > 1\nc = not 0\nd = true or false\ne = true == true").ConfigureAwait(false);
 			var strict = strictRun.miniscript;
 			CheckGlobalBool(strict.GetGlobalValue("a"), false, "a");
 			CheckGlobalBool(strict.GetGlobalValue("b"), true, "b");
@@ -114,14 +110,12 @@ namespace Miniscript {
 			CheckGlobalBool(strict.GetGlobalValue("d"), true, "d");
 			CheckGlobalBool(strict.GetGlobalValue("e"), true, "e");
 
-			// Legacy mode still prints map.push values as numeric-style truth.
-			await CheckOutput("m = {}\nm.push 42\nprint m[42]", true, "1").ConfigureAwait(false);
-			await CheckOutput("m = {}\nm.push 42\nprint m[42]", false, "true").ConfigureAwait(false);
+			await CheckOutput("m = {}\nm.push 42\nprint m[42]", "true").ConfigureAwait(false);
 
 			// yield should await asynchronously and still complete in one RunUntilDone call.
-			await CheckOutput("print 1\nyield\nprint 2", false, "1", "2").ConfigureAwait(false);
-			await CheckOutput("print 1\ndelay 0\nprint 2", false, "1", "2").ConfigureAwait(false);
-			await CheckOutput("print 1\nwait 0\nprint 2", false, "1", "2").ConfigureAwait(false);
+			await CheckOutput("print 1\nyield\nprint 2", "1", "2").ConfigureAwait(false);
+			await CheckOutput("print 1\ndelay 0\nprint 2", "1", "2").ConfigureAwait(false);
+			await CheckOutput("print 1\nwait 0\nprint 2", "1", "2").ConfigureAwait(false);
 			var syncOnlyDelay = new Interpreter("delay 0.01");
 			bool syncOnlyDelayThrew = false;
 			try {
@@ -136,7 +130,7 @@ namespace Miniscript {
 			if (Intrinsic.GetByName(lambdaAddName) == null) {
 				Intrinsic.CreateFromLambda(lambdaAddName, (double x, double y) => x + y);
 			}
-			await CheckOutput("print " + lambdaAddName + "(2,3)", false, "5").ConfigureAwait(false);
+			await CheckOutput("print " + lambdaAddName + "(2,3)", "5").ConfigureAwait(false);
 
 			// object-typed lambda parameters should still receive unwrapped CLR primitives.
 			const string lambdaObjKindName = "__unit_lambda_obj_kind";
@@ -154,7 +148,6 @@ namespace Miniscript {
 				"print " + lambdaObjKindName + "(true)\n" +
 				"print " + lambdaObjKindName + "(\"foo\")\n" +
 				"print " + lambdaObjKindName + "([])",
-				false,
 				"double",
 				"bool",
 				"string",
@@ -166,7 +159,7 @@ namespace Miniscript {
 			if (Intrinsic.GetByName(lambdaListSumName) == null) {
 				Intrinsic.CreateFromLambda(lambdaListSumName, (List<double> xs) => xs.Sum());
 			}
-			await CheckOutput("print " + lambdaListSumName + "([1,2,3])", false, "6").ConfigureAwait(false);
+			await CheckOutput("print " + lambdaListSumName + "([1,2,3])", "6").ConfigureAwait(false);
 
 			// Sync-only run should throw if an intrinsic returns an incomplete async task.
 			const string asyncNeverName = "__unit_async_never";
