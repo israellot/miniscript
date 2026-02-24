@@ -10,6 +10,7 @@ just call Miniscript.UnitTest.Run().
 */
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Miniscript {
@@ -117,14 +118,50 @@ namespace Miniscript {
 			await CheckOutput("m = {}\nm.push 42\nprint m[42]", true, "1").ConfigureAwait(false);
 			await CheckOutput("m = {}\nm.push 42\nprint m[42]", false, "true").ConfigureAwait(false);
 
+			// Lambda factory should map lambda parameters to intrinsic args by name.
+			const string lambdaAddName = "__unit_lambda_add";
+			if (Intrinsic.GetByName(lambdaAddName) == null) {
+				Intrinsic.CreateFromLambda(lambdaAddName, (double x, double y) => x + y);
+			}
+			await CheckOutput("print " + lambdaAddName + "(2,3)", false, "5").ConfigureAwait(false);
+
+			// object-typed lambda parameters should still receive unwrapped CLR primitives.
+			const string lambdaObjKindName = "__unit_lambda_obj_kind";
+			if (Intrinsic.GetByName(lambdaObjKindName) == null) {
+				Intrinsic.CreateFromLambda(lambdaObjKindName, (object x) => {
+					if (x == null) return "null";
+					if (x is double) return "double";
+					if (x is bool) return "bool";
+					if (x is string) return "string";
+					return "value";
+				});
+			}
+			await CheckOutput(
+				"print " + lambdaObjKindName + "(3)\n" +
+				"print " + lambdaObjKindName + "(true)\n" +
+				"print " + lambdaObjKindName + "(\"foo\")\n" +
+				"print " + lambdaObjKindName + "([])",
+				false,
+				"double",
+				"bool",
+				"string",
+				"value"
+			).ConfigureAwait(false);
+
+			// Lambda factory should convert ValList to typed List<T> parameters.
+			const string lambdaListSumName = "__unit_lambda_list_sum";
+			if (Intrinsic.GetByName(lambdaListSumName) == null) {
+				Intrinsic.CreateFromLambda(lambdaListSumName, (List<double> xs) => xs.Sum());
+			}
+			await CheckOutput("print " + lambdaListSumName + "([1,2,3])", false, "6").ConfigureAwait(false);
+
 			// Sync-only run should throw if an intrinsic returns an incomplete async task.
 			const string asyncNeverName = "__unit_async_never";
 			if (Intrinsic.GetByName(asyncNeverName) == null) {
-				var f = Intrinsic.Create(asyncNeverName);
-				f.codeTask = (context) => {
+				Intrinsic.Create(asyncNeverName, (context) => {
 					var tcs = new TaskCompletionSource<Value>();
 					return tcs.Task;
-				};
+				});
 			}
 			var syncOnly = new Interpreter("x = " + asyncNeverName);
 			bool syncOnlyThrew = false;

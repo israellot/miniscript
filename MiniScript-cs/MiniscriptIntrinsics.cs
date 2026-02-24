@@ -19,6 +19,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Reflection;
 using System.Threading.Tasks;
 
 namespace Miniscript {
@@ -83,6 +84,54 @@ namespace Miniscript {
 			result.valFunction = new ValFunction(result.function);
 			all.Add(result);
 			nameMap[name] = result;
+			return result;
+		}
+
+		/// <summary>
+		/// Factory method to create a new Intrinsic with sync code.
+		/// </summary>
+		public static Intrinsic Create(string name, IntrinsicCode code) {
+			Intrinsic result = Create(name);
+			result.code = code;
+			return result;
+		}
+
+		/// <summary>
+		/// Factory method to create a new Intrinsic with Task-based async code.
+		/// </summary>
+		public static Intrinsic Create(string name, IntrinsicCodeTask codeTask) {
+			Intrinsic result = Create(name);
+			result.codeTask = codeTask;
+			return result;
+		}
+
+		/// <summary>
+		/// Factory method to create a new Intrinsic with ValueTask-based async code.
+		/// </summary>
+		public static Intrinsic Create(string name, IntrinsicCodeValueTask codeValueTask) {
+			Intrinsic result = Create(name);
+			result.codeValueTask = codeValueTask;
+			return result;
+		}
+
+		/// <summary>
+		/// Factory method to create a new Intrinsic from a single lambda expression.
+		/// Lambda parameters (except TAC.Context) are automatically mapped from
+		/// intrinsic arguments by parameter name.
+		/// </summary>
+		public static Intrinsic CreateFromLambda<TDelegate>(string name, TDelegate lambda)
+			where TDelegate : Delegate {
+			if (lambda == null) throw new ArgumentNullException("lambda");
+			Intrinsic result = Create(name);
+			ParameterInfo[] parameters = lambda.Method.GetParameters();
+			foreach (ParameterInfo param in parameters) {
+				if (param.ParameterType == typeof(TAC.Context)) continue;
+				if (string.IsNullOrEmpty(param.Name)) {
+					throw new RuntimeException("intrinsic lambda parameter name is missing");
+				}
+				result.AddParam(param.Name);
+			}
+			result.code = (context) => InvokeLambda(lambda, parameters, context, name);
 			return result;
 		}
 		
@@ -167,6 +216,157 @@ namespace Miniscript {
 			if (item.codeValueTask != null) return new Result(item.codeValueTask(context));
 			if (item.codeTask != null) return new Result(item.codeTask(context));
 			throw new RuntimeException("intrinsic '" + item.name + "' has no implementation");
+		}
+
+		static Result InvokeLambda(Delegate lambda, ParameterInfo[] parameters, TAC.Context context, string intrinsicName) {
+			object[] args = new object[parameters.Length];
+			for (int i = 0; i < parameters.Length; i++) {
+				ParameterInfo param = parameters[i];
+				if (param.ParameterType == typeof(TAC.Context)) {
+					args[i] = context;
+					continue;
+				}
+				Value local = context.GetLocal(param.Name);
+				args[i] = ConvertValueToClr(local, param.ParameterType, intrinsicName, param.Name);
+			}
+
+			object rawResult;
+			try {
+				rawResult = lambda.DynamicInvoke(args);
+			} catch (TargetInvocationException tie) {
+				if (tie.InnerException is MiniscriptException mse) throw mse;
+				if (tie.InnerException != null) throw tie.InnerException;
+				throw;
+			}
+
+			return ConvertLambdaResult(rawResult, lambda.Method.ReturnType, intrinsicName);
+		}
+
+		static object ConvertValueToClr(Value value, Type targetType, string intrinsicName, string paramName) {
+			Type nullableTarget = Nullable.GetUnderlyingType(targetType);
+			if (nullableTarget != null) {
+				if (value == null) return null;
+				return ConvertValueToClr(value, nullableTarget, intrinsicName, paramName);
+			}
+
+			if (targetType == typeof(Value)) return value;
+			if (targetType == typeof(object)) return ConvertValueToObject(value);
+			if (targetType.IsGenericType) {
+				Type genericDef = targetType.GetGenericTypeDefinition();
+				if (genericDef == typeof(List<>)) {
+					Type elemType = targetType.GetGenericArguments()[0];
+					return ConvertValueToTypedList(value, elemType, intrinsicName, paramName);
+				}
+				if (genericDef == typeof(IReadOnlyList<>)) {
+					Type elemType = targetType.GetGenericArguments()[0];
+					return ConvertValueToTypedList(value, elemType, intrinsicName, paramName);
+				}
+			}
+			if (targetType == typeof(string)) return value == null ? null : value.ToString();
+			if (targetType == typeof(double)) return value == null ? 0.0 : value.DoubleValue();
+			if (targetType == typeof(float)) return value == null ? 0f : value.FloatValue();
+			if (targetType == typeof(int)) return value == null ? 0 : value.IntValue();
+			if (targetType == typeof(long)) return value == null ? 0L : (long)value.IntValue();
+			if (targetType == typeof(bool)) return value != null && value.BoolValue();
+			if (targetType == typeof(short)) return value == null ? (short)0 : (short)value.IntValue();
+			if (targetType == typeof(byte)) return value == null ? (byte)0 : (byte)value.IntValue();
+
+			if (typeof(Value).IsAssignableFrom(targetType)) {
+				if (value == null) return null;
+				if (targetType.IsInstanceOfType(value)) return value;
+				throw new TypeException("intrinsic '" + intrinsicName + "' parameter '" + paramName +
+					"' requires " + targetType.Name + " but got " + value.GetType().Name);
+			}
+
+			throw new TypeException("intrinsic '" + intrinsicName + "' parameter '" + paramName +
+				"' has unsupported type " + targetType.Name);
+		}
+
+		static object ConvertValueToObject(Value value) {
+			if (value == null || value is ValNull) return null;
+			if (value is ValNumber num) return num.value;
+			if (value is ValBool b) return b.value;
+			if (value is ValString s) return s.value;
+			return value;
+		}
+
+		static object ConvertValueToTypedList(Value value, Type elemType, string intrinsicName, string paramName) {
+			if (value == null || value is ValNull) return null;
+			if (!(value is ValList valList)) {
+				throw new TypeException("intrinsic '" + intrinsicName + "' parameter '" + paramName +
+					"' requires a list but got " + value.GetType().Name);
+			}
+
+			Type listType = typeof(List<>).MakeGenericType(elemType);
+			object clrList = Activator.CreateInstance(listType);
+			MethodInfo addMethod = listType.GetMethod("Add");
+			foreach (Value elem in valList.values) {
+				object converted = ConvertValueToClr(elem, elemType, intrinsicName, paramName);
+				addMethod.Invoke(clrList, new object[] { converted });
+			}
+			return clrList;
+		}
+
+		static Result ConvertLambdaResult(object rawResult, Type returnType, string intrinsicName) {
+			if (returnType == typeof(void)) return Result.Null;
+			if (rawResult == null) return Result.Null;
+
+			if (rawResult is Result resultObj) return resultObj;
+			if (rawResult is Task taskObj) return new Result(ConvertTaskToValue(taskObj, returnType, intrinsicName));
+			if (returnType == typeof(ValueTask)) return new Result(ConvertValueTaskToValue((ValueTask)rawResult));
+			if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>)) {
+				Type innerType = returnType.GetGenericArguments()[0];
+				if (innerType == typeof(Value)) return new Result((ValueTask<Value>)rawResult);
+				if (innerType == typeof(Result)) return new Result(ConvertValueTaskResultToValue((ValueTask<Result>)rawResult));
+			}
+			if (rawResult is Value valueObj) return new Result(valueObj);
+			if (rawResult is string strObj) return new Result(strObj);
+			if (rawResult is bool boolObj) return new Result(ValBool.Truth(boolObj));
+			if (rawResult is int intObj) return new Result(intObj);
+			if (rawResult is long longObj) return new Result((double)longObj);
+			if (rawResult is float floatObj) return new Result((double)floatObj);
+			if (rawResult is double doubleObj) return new Result(doubleObj);
+			if (rawResult is short shortObj) return new Result((double)shortObj);
+			if (rawResult is byte byteObj) return new Result((double)byteObj);
+
+			throw new TypeException("intrinsic '" + intrinsicName + "' return type '" +
+				rawResult.GetType().Name + "' is not supported");
+		}
+
+		static Task<Value> ConvertTaskToValue(Task task, Type returnType, string intrinsicName) {
+			if (returnType == typeof(Task)) return ConvertTaskNoResult(task);
+			if (!returnType.IsGenericType || returnType.GetGenericTypeDefinition() != typeof(Task<>)) {
+				throw new TypeException("intrinsic '" + intrinsicName + "' has unsupported async return type");
+			}
+			Type innerType = returnType.GetGenericArguments()[0];
+			if (innerType == typeof(Value)) return (Task<Value>)task;
+			if (innerType == typeof(Result)) return ConvertTaskResultToValue((Task<Result>)task);
+			throw new TypeException("intrinsic '" + intrinsicName + "' async return type Task<" +
+				innerType.Name + "> is not supported");
+		}
+
+		static async Task<Value> ConvertTaskNoResult(Task task) {
+			await task.ConfigureAwait(false);
+			return null;
+		}
+
+		static async Task<Value> ConvertTaskResultToValue(Task<Result> task) {
+			Result result = await task.ConfigureAwait(false);
+			if (result == null) return null;
+			if (result.IsAsync) return await result.task.ConfigureAwait(false);
+			return result.result;
+		}
+
+		static async Task<Value> ConvertValueTaskToValue(ValueTask task) {
+			await task.ConfigureAwait(false);
+			return null;
+		}
+
+		static async Task<Value> ConvertValueTaskResultToValue(ValueTask<Result> task) {
+			Result result = await task.ConfigureAwait(false);
+			if (result == null) return null;
+			if (result.IsAsync) return await result.task.ConfigureAwait(false);
+			return result.result;
 		}
 		
 		/// <summary>
